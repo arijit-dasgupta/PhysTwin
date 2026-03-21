@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BASE_PATH="${BASE_PATH:-./data/different_types}"
 OUTPUT_DIR="${OUTPUT_DIR:-./replay_rrds}"
-REPLAY_OPTS="${REPLAY_OPTS:---medium}"
+REPLAY_OPTS="${REPLAY_OPTS:---medium}"  # --medium: original + spring stretch + masses + ground
 LOG_FILE="${LOG_FILE:-replay_all.log}"
 
 cd "$PROJECT_ROOT"
