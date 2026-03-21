@@ -1,85 +1,84 @@
 # Rerun visualization (spring–mass replay)
 
-**Default: write to `.rrd` file** — no network. Copy to laptop and `rerun replay_<case>.rrd`.
+**Default: write a `.rrd` file** — no network. Copy to your laptop and open with the Rerun app.
 
 ---
 
-## Default: **file** (write .rrd)
+## Single case → `.rrd`
 
 ```bash
 python -m rerun_viz.replay_recorded --case_name double_lift_cloth_3 [--max_frames 50] [--output-rrd my_replay.rrd]
 ```
 
-Writes `replay_<case_name>.rrd` (or `--output-rrd`). Copy to your laptop and open with `rerun replay_*.rrd`.
+Writes `replay_<case_name>.rrd` unless `--output-rrd` is set.
+
+**Options:** `--minimal`, `--medium`, `--no-global-normalization`, `--rerun_mode file|serve|connect`, etc. See `python -m rerun_viz.replay_recorded --help`.
+
+**CLI UX:** Warp’s device banner and qqtt `[DATA]` / `[SIMULATION]` INFO lines are suppressed on the TTY; after load you get a short **PhysTwin ready** summary (checkpoint, mesh, frames). The global color **pre-pass** shows a **`pre-pass` tqdm** progress bar. `torch.load` `FutureWarning` is filtered for that call.
+
+**Speed (pre-pass):** The pre-pass runs full physics once per frame (like replay) to estimate global color ranges. **Faster options:** (1) **`--no-global-normalization`** — skips pre-pass entirely (per-frame colors). (2) **`--max_frames N`** — fewer frames for both pre-pass and replay. (3) **On-disk cache (default on)** — second run with the same case, frame range, and checkpoint reuses `experiments/<case>/train/.replay_prepass_<start>_<end>.pkl`. Use **`--prepass-refresh`** to recompute, **`--no-prepass-cache`** to disable cache read/write.
+
+---
+
+## All cases → one folder
+
+```bash
+./rerun_viz/replay_all_cases.sh
+# or: nohup ./rerun_viz/replay_all_cases.sh &
+```
+
+Outputs under `./replay_rrds/`; log in `replay_all.log`. See script header for `LOG_FILE`, `BASE_PATH`.
 
 ---
 
 ## Optional: **serve** (live VM → laptop)
 
-1. **Laptop:** open SSH with a **local** forward (traffic: laptop `127.0.0.1:9876` → VM `127.0.0.1:9876`):
+1. **Laptop:** SSH with local forward, e.g. `ssh -L 9876:127.0.0.1:9876 user@vm`
+2. **VM:** `python -m rerun_viz.replay_recorded --case_name YOUR_CASE --rerun_mode serve`
+3. **Laptop:** `rerun rerun+http://127.0.0.1:9876/proxy` while the VM process is running
 
-   ```bash
-   ssh -L 9876:127.0.0.1:9876 user@your-vm
-   ```
-
-   Example `~/.ssh/config` (use **either** `LocalForward` **or** `RemoteForward` for port 9876 — not both):
-
-   ```
-   Host my-vm
-     HostName ...
-     User ...
-     LocalForward 9876 127.0.0.1:9876
-   ```
-
-2. **VM:** run with `--rerun_mode serve`:
-
-   ```bash
-   python -m rerun_viz.jtap_style_demo
-   python -m rerun_viz.demo_random_points --seconds 30
-   python -m rerun_viz.replay_recorded --case_name YOUR_CASE ...
-   ```
-
-3. **Laptop** (separate terminal, while SSH stays connected), **while the VM script is still running**:
-
-   ```bash
-   rerun rerun+http://127.0.0.1:9876/proxy
-   ```
-
-   If the Python process on the VM has already exited, **nothing is listening** — connect before stopping the script, or use `jtap_style_demo` which **keeps the server alive** until you press Ctrl+C on the VM.
-
-Match **Rerun app** version to **rerun_sdk** (e.g. both 0.30.x).
+Printed hints: `REMOTE_LIVE_SERVE_SSH` from `connect_instructions.py`.
 
 ---
 
-## Alternative: **connect** (Python pushes to viewer; SSH `-R`)
+## Optional: **connect** (Python pushes to viewer; SSH `-R`)
 
 Viewer on laptop first, then:
 
 ```bash
 ssh -R 9876:127.0.0.1:9876 user@your-vm
-```
-
-Then on VM:
-
-```bash
 python -m rerun_viz.replay_recorded ... --rerun_mode connect
 ```
 
-This often shows **flush timeouts** over SSH; prefer **serve** above.
+May show flush timeouts over SSH; **serve** is usually easier. See `JTAP_STYLE_SSH` in `connect_instructions.py`.
 
 ---
 
-## File-only (no network)
+## Other modules
+
+| Module | Role |
+|--------|------|
+| `replay_core` | Replay loop + Rerun streaming (imported by `replay_recorded`) |
+| `case_setup` | Shared `cfg` loading (yaml + optimal params + camera) |
+| `terminal_output` | TTY-colored status lines for replay |
+| `spring_mass_logging` | Logging helpers for replay |
+| `inspect_case_stats` | Print mass/stiffness stats (same asserts as replay) |
+| `port_util` | Free-port helpers for `serve` |
+
+---
+
+## Tests
 
 ```bash
-python -m rerun_viz.jtap_style_demo --mode file --rrd-path /tmp/demo.rrd
+pytest tests/test_spring_mass_logging.py tests/test_port_util.py tests/test_case_setup.py \
+  tests/test_terminal_output.py tests/test_replay_helpers.py -q
 ```
 
-Copy `demo.rrd` to the laptop and: `rerun demo.rrd`
+Format / lint (requires [Ruff](https://docs.astral.sh/ruff/)):
 
----
+```bash
+ruff check rerun_viz tests
+ruff format rerun_viz tests
+```
 
-## Helpers
-
-- `minimal_rerun_serve_test` — tiny serve-mode check.
-- `connect_instructions.py` — text blocks printed by the scripts (`REMOTE_LIVE_SERVE_SSH`, `JTAP_STYLE_SSH`).
+Match **Rerun app** version to **rerun_sdk** (e.g. 0.30.x).

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Print empirical distribution of masses and spring stiffness for a PhysTwin case.
 
+Uses the same config/checkpoint requirements as ``replay_recorded`` (optimal params + best checkpoint).
+
 Usage:
     python rerun_viz/inspect_case_stats.py --case_name double_lift_cloth_3
 """
+
 from __future__ import annotations
 
 import glob
@@ -18,25 +21,19 @@ import numpy as np
 import torch
 
 from qqtt import InvPhyTrainerWarp
-from qqtt.utils import cfg, logger
+from qqtt.utils import logger
+from rerun_viz.case_setup import load_case_yaml_and_optimal
 
 
 def main() -> None:
     import argparse
+
     p = argparse.ArgumentParser()
     p.add_argument("--case_name", required=True)
     p.add_argument("--base_path", default="./data/different_types")
     args = p.parse_args()
 
-    if "cloth" in args.case_name or "package" in args.case_name:
-        cfg.load_from_yaml("configs/cloth.yaml")
-    else:
-        cfg.load_from_yaml("configs/real.yaml")
-
-    optimal_path = f"experiments_optimization/{args.case_name}/optimal_params.pkl"
-    import pickle
-    with open(optimal_path, "rb") as f:
-        cfg.set_optimal_params(pickle.load(f))
+    load_case_yaml_and_optimal(args.case_name)
 
     base_dir = f"experiments/{args.case_name}"
     logger.set_log_file(path=base_dir, name="inspect_stats_log")
@@ -48,14 +45,14 @@ def main() -> None:
     )
 
     candidates = glob.glob(f"{base_dir}/train/best_*.pth")
-    if not candidates:
-        print(f"No best_*.pth found for {args.case_name}")
-        return
+    assert len(candidates) > 0, (
+        f"No best_*.pth checkpoint found under {base_dir}/train; did you run training?"
+    )
     ckpt = torch.load(candidates[0], map_location="cpu")
 
     import warp as wp
+
     masses = wp.to_torch(trainer.simulator.wp_masses).detach().cpu().numpy()
-    # Checkpoint stores spring_Y in linear space; simulator uses log internally
     stiffness = ckpt["spring_Y"].detach().cpu().numpy().astype(np.float64)
     stiffness_finite = stiffness[np.isfinite(stiffness)]
 

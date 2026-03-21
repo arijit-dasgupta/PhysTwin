@@ -1,0 +1,102 @@
+---
+description: deploy my minions — Task(planner|implementer|verifier) only; after Task(verifier) PARTIAL/FAIL the NEXT action MUST be Task(implementer) with no user prompt; parent never implements.
+alwaysApply: true
+---
+
+# Deploy my minions — forced subagents + autoloop
+
+**Roleplay** (`[IMPLEMENTER]` in the **parent chat** while editing files) is **invalid**. Implementation **only** happens inside **`Task(subagent_type=implementer)`** — same as Verifier must use **`Task(verifier)`**.
+
+---
+
+## CRITICAL — after `Task(verifier)` returns
+
+**Without waiting for the user to say “continue”:**
+
+| Verifier verdict | **Mandatory very next step** (same assistant turn / next tool call) |
+|------------------|---------------------------------------------------------------------|
+| **PASS** | `[AREA CHAIR]` (short) **or** end minions run. **Do not** call `Task(implementer)`. |
+| **PARTIAL**, **FAIL**, or **BLOCKED** with numbered / actionable items | **`Task(subagent_type=implementer)`** with Verifier output + plan path + item numbers. **Required.** |
+
+**Orchestration violation:** Pasting Verifier PARTIAL/FAIL and then **not** calling **`Task(implementer)`** in the **immediate** follow-up (or asking the user to confirm) is **forbidden**.
+
+**Orchestrator must not** apply Verifier fixes with **parent `write` / `search_replace` / terminal edits** — only **`Task(implementer)`** may change the repo for those fixes.
+
+Then, after **`Task(implementer)`** completes → **immediately** **`Task(verifier)`** again (autoloop until PASS or cap).
+
+---
+
+## Non-negotiable: every phase is a `Task` (empty context)
+
+| Role | Required invocation | Forbidden |
+|------|---------------------|-----------|
+| **Planner** | **`Task(subagent_type=planner)`** | Parent writing plan / planning Q&A |
+| **Implementer** | **`Task(subagent_type=implementer)`** | **Parent implementing:** any repo edit, patch, or “quick fix” in the orchestrator chat |
+| **Verifier** | **`Task(subagent_type=verifier, readonly=true)`** | Parent acting as auditor or fixing findings |
+
+**Orchestrator’s allowed actions:** **`Task(...)`** calls, paste subagent output, brief `[ORCHESTRATOR]` / `[AREA CHAIR]` text — **not** implementation edits.
+
+---
+
+## Trigger
+
+Phrases (case-insensitive): **`deploy my minions`**, **`deploy the minions`**.
+
+If no task: `[ORCHESTRATOR]` asks what to build; **stop** (no `Task` yet).
+
+---
+
+## Autoloop (no user handoff between machine steps)
+
+The user must **not** type “continue” between:
+
+| Step A | Step B (immediate) |
+|--------|---------------------|
+| `Task(implementer)` finishes | `Task(verifier)` |
+| `Task(verifier)` → PARTIAL/FAIL | `Task(implementer)` with findings |
+| `Task(planner)` + user answered in chat | `Task(planner)` again with answers |
+| Planner → `READY FOR IMPLEMENTER` | `Task(implementer)` |
+
+**Exception:** Planner **numbered questions** — orchestrator **waits** for user reply, then **`Task(planner)`** again.
+
+**Safety cap:** max **10** Implementer→Verifier cycles; then `[ORCHESTRATOR]` BLOCKED + summary.
+
+---
+
+## Mandatory sequence (reference)
+
+1. `Task(planner)` → … → `READY FOR IMPLEMENTER`
+2. `Task(implementer)` — **only** subagent may implement
+3. `Task(verifier)`
+4. If PASS → `[AREA CHAIR]`. If PARTIAL/FAIL → **step 2** (mandatory `Task(implementer)`), then **3**, loop.
+
+---
+
+## Prompt payloads (cold-start)
+
+- **Implementer:** plan path, READY line, Verifier **verbatim** numbered list, “fix these only; then stop for Task(verifier).”
+- **Verifier:** plan path, scope, “readonly, no edits.”
+
+---
+
+## If `Task` unavailable
+
+`[ORCHESTRATOR]` BLOCKED — `/planner` → `/implementer` → `/verifier` manually; same autoloop discipline.
+
+---
+
+## Parent labels
+
+`[ORCHESTRATOR]` — announce each **`Task`** launch; paste subagent tags verbatim.
+
+---
+
+## Cursor Plan mode
+
+Canonical plans: **`.cursor/plans/*.md`**.
+
+---
+
+## Notes
+
+- `.cursor/agents/*.md`

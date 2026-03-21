@@ -1,12 +1,15 @@
-import torch
-from qqtt.utils import logger, cfg
-
 # CRITICAL: Clear sys.argv before importing warp to prevent LLVM command-line option conflicts
 # LLVM's command-line parser is initialized when the warp module is imported
 import sys
+
+import torch
+
+from qqtt.utils import cfg, logger
+
 _original_argv_spring_mass = sys.argv.copy()
 sys.argv = [sys.argv[0]]  # Keep only script name
-import warp as wp
+import warp as wp  # noqa: E402
+
 # Restore argv after warp import
 sys.argv = _original_argv_spring_mass
 
@@ -22,7 +25,7 @@ if not hasattr(wp, '_warp_initialized_by_spring_mass'):
         # try to set device anyway
         try:
             wp.set_device("cuda:0")
-        except:
+        except Exception:
             pass
 
 if not cfg.use_graph:
@@ -201,8 +204,11 @@ def loop(
     m1 = masses[i]
     mask1 = masks[i]
 
-    valid_count = float(0.0)
-    J_sum = wp.vec3(0.0, 0.0, 0.0)
+    # Dynamic accumulators (Warp adjoint: cannot mutate literal-initialized vars in dynamic loops)
+    valid_count = float(0.0)  # noqa: UP018
+    jx = float(0.0)  # noqa: UP018
+    jy = float(0.0)  # noqa: UP018
+    jz = float(0.0)  # noqa: UP018
     for k in range(collision_number[i]):
         index = collision_indices[i][k]
         x2 = x[index]
@@ -242,8 +248,11 @@ def loop(
 
             J = impulse_n + impulse_t
 
-            J_sum += J
+            jx += J[0]
+            jy += J[1]
+            jz += J[2]
 
+    J_sum = wp.vec3(jx, jy, jz)
     return valid_count, J_sum
 
 
@@ -392,8 +401,9 @@ def compute_neigh_indices(
     neigh_indices: wp.array(dtype=wp.int32),
 ):
     i = wp.tid()
-    min_dist = float(1e6)
-    min_index = int(-1)
+    # Dynamic loop accumulators (Warp codegen: mutating literals in loops breaks adjoint; float()/int() required)
+    min_dist = float(1e6)  # noqa: UP018
+    min_index = int(-1)  # noqa: UP018
     for j in range(distances.shape[1]):
         if distances[i, j] < min_dist:
             min_dist = distances[i, j]
@@ -618,8 +628,11 @@ class SpringMassSystemWarp:
         self_collision=False,
         disable_backward=False,
     ):
-        logger.info(f"[SIMULATION]: Initialize the Spring-Mass System")
+        logger.info("[SIMULATION]: Initialize the Spring-Mass System")
         self.device = cfg.device
+        # Benchmark-only: CUDA event segmentation inside step(); no overhead when False.
+        self._benchmark_profile_step: bool = False
+        self._last_step_segment_ms: dict[str, float] = {}
 
         # Record the parameters
         self.wp_init_vertices = wp.from_torch(
@@ -655,7 +668,7 @@ class SpringMassSystemWarp:
             assert (controller_points.shape[1] + num_object_points) == self.n_vertices
         self.num_object_points = num_object_points
         self.num_control_points = (
-            controller_points.shape[1] if not controller_points is None else 0
+            controller_points.shape[1] if controller_points is not None else 0
         )
         self.controller_points = controller_points
 
@@ -748,7 +761,7 @@ class SpringMassSystemWarp:
 
         # Initialize the warp parameters
         self.wp_states = []
-        for i in range(self.num_substeps + 1):
+        for _i in range(self.num_substeps + 1):
             state = State(self.wp_init_velocities, self.num_control_points)
             self.wp_states.append(state)
         if cfg.data_type == "real":
@@ -970,10 +983,38 @@ class SpringMassSystemWarp:
         )
 
     def step(self):
+        prof = self._benchmark_profile_step
+        if prof:
+            seg = {
+                "control_points": 0.0,
+                "springs": 0.0,
+                "velocity_integration": 0.0,
+                "object_pair_collision": 0.0,
+                "integrate_ground": 0.0,
+            }
+            ev_s = torch.cuda.Event(enable_timing=True)
+            ev_e = torch.cuda.Event(enable_timing=True)
+
         for i in range(self.num_substeps):
             self.wp_states[i].clear_forces()
-            if not self.controller_points is None:
-                # Set the control point
+            if prof:
+                if self.controller_points is not None:
+                    ev_s.record()
+                    wp.launch(
+                        set_control_points,
+                        dim=self.num_control_points,
+                        inputs=[
+                            self.num_substeps,
+                            self.wp_original_control_point,
+                            self.wp_target_control_point,
+                            i,
+                        ],
+                        outputs=[self.wp_states[i].wp_control_x],
+                    )
+                    ev_e.record()
+                    torch.cuda.synchronize()
+                    seg["control_points"] += ev_s.elapsed_time(ev_e)
+            elif self.controller_points is not None:
                 wp.launch(
                     set_control_points,
                     dim=self.num_control_points,
@@ -986,79 +1027,162 @@ class SpringMassSystemWarp:
                     outputs=[self.wp_states[i].wp_control_x],
                 )
 
-            # Calculate the spring forces
-            wp.launch(
-                kernel=eval_springs,
-                dim=self.n_springs,
-                inputs=[
-                    self.wp_states[i].wp_x,
-                    self.wp_states[i].wp_v,
-                    self.wp_states[i].wp_control_x,
-                    self.wp_states[i].wp_control_v,
-                    self.num_object_points,
-                    self.wp_springs,
-                    self.wp_rest_lengths,
-                    self.wp_spring_Y,
-                    self.dashpot_damping,
-                    self.spring_Y_min,
-                    self.spring_Y_max,
-                ],
-                outputs=[self.wp_states[i].wp_vertice_forces],
-            )
+            if prof:
+                ev_s.record()
+                wp.launch(
+                    kernel=eval_springs,
+                    dim=self.n_springs,
+                    inputs=[
+                        self.wp_states[i].wp_x,
+                        self.wp_states[i].wp_v,
+                        self.wp_states[i].wp_control_x,
+                        self.wp_states[i].wp_control_v,
+                        self.num_object_points,
+                        self.wp_springs,
+                        self.wp_rest_lengths,
+                        self.wp_spring_Y,
+                        self.dashpot_damping,
+                        self.spring_Y_min,
+                        self.spring_Y_max,
+                    ],
+                    outputs=[self.wp_states[i].wp_vertice_forces],
+                )
+                ev_e.record()
+                torch.cuda.synchronize()
+                seg["springs"] += ev_s.elapsed_time(ev_e)
+            else:
+                wp.launch(
+                    kernel=eval_springs,
+                    dim=self.n_springs,
+                    inputs=[
+                        self.wp_states[i].wp_x,
+                        self.wp_states[i].wp_v,
+                        self.wp_states[i].wp_control_x,
+                        self.wp_states[i].wp_control_v,
+                        self.num_object_points,
+                        self.wp_springs,
+                        self.wp_rest_lengths,
+                        self.wp_spring_Y,
+                        self.dashpot_damping,
+                        self.spring_Y_min,
+                        self.spring_Y_max,
+                    ],
+                    outputs=[self.wp_states[i].wp_vertice_forces],
+                )
 
             if self.object_collision_flag:
                 output_v = self.wp_states[i].wp_v_before_collision
             else:
                 output_v = self.wp_states[i].wp_v_before_ground
 
-            # Update the output_v using the vertive_forces
-            wp.launch(
-                kernel=update_vel_from_force,
-                dim=self.num_object_points,
-                inputs=[
-                    self.wp_states[i].wp_v,
-                    self.wp_states[i].wp_vertice_forces,
-                    self.wp_masses,
-                    self.dt,
-                    self.drag_damping,
-                    self.reverse_factor,
-                ],
-                outputs=[output_v],
-            )
+            if prof:
+                ev_s.record()
+                wp.launch(
+                    kernel=update_vel_from_force,
+                    dim=self.num_object_points,
+                    inputs=[
+                        self.wp_states[i].wp_v,
+                        self.wp_states[i].wp_vertice_forces,
+                        self.wp_masses,
+                        self.dt,
+                        self.drag_damping,
+                        self.reverse_factor,
+                    ],
+                    outputs=[output_v],
+                )
+                ev_e.record()
+                torch.cuda.synchronize()
+                seg["velocity_integration"] += ev_s.elapsed_time(ev_e)
+            else:
+                wp.launch(
+                    kernel=update_vel_from_force,
+                    dim=self.num_object_points,
+                    inputs=[
+                        self.wp_states[i].wp_v,
+                        self.wp_states[i].wp_vertice_forces,
+                        self.wp_masses,
+                        self.dt,
+                        self.drag_damping,
+                        self.reverse_factor,
+                    ],
+                    outputs=[output_v],
+                )
 
             if self.object_collision_flag:
-                # Update the wp_v_before_ground based on the collision handling
+                if prof:
+                    ev_s.record()
+                    wp.launch(
+                        kernel=object_collision,
+                        dim=self.num_object_points,
+                        inputs=[
+                            self.wp_states[i].wp_x,
+                            self.wp_states[i].wp_v_before_collision,
+                            self.wp_masses,
+                            self.wp_masks,
+                            self.wp_collide_object_elas,
+                            self.wp_collide_object_fric,
+                            self.collision_dist,
+                            self.wp_collision_indices,
+                            self.wp_collision_number,
+                        ],
+                        outputs=[self.wp_states[i].wp_v_before_ground],
+                    )
+                    ev_e.record()
+                    torch.cuda.synchronize()
+                    seg["object_pair_collision"] += ev_s.elapsed_time(ev_e)
+                else:
+                    wp.launch(
+                        kernel=object_collision,
+                        dim=self.num_object_points,
+                        inputs=[
+                            self.wp_states[i].wp_x,
+                            self.wp_states[i].wp_v_before_collision,
+                            self.wp_masses,
+                            self.wp_masks,
+                            self.wp_collide_object_elas,
+                            self.wp_collide_object_fric,
+                            self.collision_dist,
+                            self.wp_collision_indices,
+                            self.wp_collision_number,
+                        ],
+                        outputs=[self.wp_states[i].wp_v_before_ground],
+                    )
+
+            if prof:
+                ev_s.record()
                 wp.launch(
-                    kernel=object_collision,
+                    kernel=integrate_ground_collision,
                     dim=self.num_object_points,
                     inputs=[
                         self.wp_states[i].wp_x,
-                        self.wp_states[i].wp_v_before_collision,
-                        self.wp_masses,
-                        self.wp_masks,
-                        self.wp_collide_object_elas,
-                        self.wp_collide_object_fric,
-                        self.collision_dist,
-                        self.wp_collision_indices,
-                        self.wp_collision_number,
+                        self.wp_states[i].wp_v_before_ground,
+                        self.wp_collide_elas,
+                        self.wp_collide_fric,
+                        self.dt,
+                        self.reverse_factor,
                     ],
-                    outputs=[self.wp_states[i].wp_v_before_ground],
+                    outputs=[self.wp_states[i + 1].wp_x, self.wp_states[i + 1].wp_v],
+                )
+                ev_e.record()
+                torch.cuda.synchronize()
+                seg["integrate_ground"] += ev_s.elapsed_time(ev_e)
+            else:
+                wp.launch(
+                    kernel=integrate_ground_collision,
+                    dim=self.num_object_points,
+                    inputs=[
+                        self.wp_states[i].wp_x,
+                        self.wp_states[i].wp_v_before_ground,
+                        self.wp_collide_elas,
+                        self.wp_collide_fric,
+                        self.dt,
+                        self.reverse_factor,
+                    ],
+                    outputs=[self.wp_states[i + 1].wp_x, self.wp_states[i + 1].wp_v],
                 )
 
-            # Update the x and v
-            wp.launch(
-                kernel=integrate_ground_collision,
-                dim=self.num_object_points,
-                inputs=[
-                    self.wp_states[i].wp_x,
-                    self.wp_states[i].wp_v_before_ground,
-                    self.wp_collide_elas,
-                    self.wp_collide_fric,
-                    self.dt,
-                    self.reverse_factor,
-                ],
-                outputs=[self.wp_states[i + 1].wp_x, self.wp_states[i + 1].wp_v],
-            )
+        if prof:
+            self._last_step_segment_ms = dict(seg)
 
     def calculate_loss(self):
         # Compute the chamfer loss

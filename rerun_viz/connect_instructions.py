@@ -52,13 +52,12 @@ Python on the VM **listens**; the Rerun app on your laptop **connects** through 
      Comment out **RemoteForward 9876** if present — you cannot mix -R and -L
      on the same port in one session.
 
-  2) On the **VM**, run scripts with **serve** (default for our CLIs):
+  2) On the **VM**, run with **serve** (replay streams the case):
 
-       python -m rerun_viz.jtap_style_demo --mode serve
        python -m rerun_viz.replay_recorded ... --rerun_mode serve
 
   3) On the **LAPTOP** (separate terminal), connect the viewer **while the VM script
-     is still running** (or use a script that keeps the server alive after logging):
+     is still running**:
 
        rerun rerun+http://127.0.0.1:9876/proxy
 

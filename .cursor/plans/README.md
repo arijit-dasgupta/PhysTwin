@@ -1,3 +1,5 @@
 # Plans
 
-The **Planner** subagent (`.cursor/agents/planner.md`) writes detailed feature plans here as `<slug>.md`. Use them with Cursor **Plan mode** and as the handoff document for the **Implementer** subagent.
+Planner writes **detailed** `<slug>.md` files here: phases, **`- [ ]` checklists**, acceptance criteria, file tables — suitable for Cursor **Plan mode** (paste into Plan UI) and for **Implementer** handoff.
+
+**“Deploy my minions” workflow:** At least **one round** of user Q&A is required before `READY FOR IMPLEMENTER`. See `.cursor/rules/deploy-minions-orchestration.mdc`.

@@ -1,4 +1,5 @@
 """Helpers to pick a free TCP port for Rerun serve_grpc."""
+
 from __future__ import annotations
 
 import socket

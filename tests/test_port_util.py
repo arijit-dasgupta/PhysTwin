@@ -1,4 +1,5 @@
 """Tests for rerun_viz.port_util."""
+
 from __future__ import annotations
 
 import pathlib

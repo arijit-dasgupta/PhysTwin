@@ -1,0 +1,33 @@
+# Ruff configuration for PhysTwin (format + lint). Install: pip install ruff
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["qqtt", "rerun_viz", "tests", "interactive_playground_gradio.py"]
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "UP",
+  "B",
+]
+ignore = [
+  "E501",
+]
+
+# Scripts/tests that prepend sys.path before project imports.
+[tool.ruff.lint.per-file-ignores]
+"rerun_viz/replay_core.py" = ["E402"]
+"rerun_viz/replay_recorded.py" = ["E402"]
+"rerun_viz/inspect_case_stats.py" = ["E402"]
+"tests/**" = ["E402"]
+"benchmarks/**" = ["E402"]
+"scripts/bench_spring_mass_gpu.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["qqtt", "rerun_viz"]
+
+[tool.ruff.format]
+quote-style = "double"

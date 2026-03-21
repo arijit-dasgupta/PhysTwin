@@ -19,6 +19,7 @@ from rerun_viz.spring_mass_logging import (  # noqa: E402
     log_points_and_springs,
     log_springs_by_stretch,
     log_velocities,
+    object_object_spring_row_indices,
 )
 
 
@@ -89,6 +90,13 @@ def test_build_spring_strips_no_controls():
     assert strips.shape == (1, 2, 3)
     np.testing.assert_allclose(strips[0, 0], object_pos[0])
     np.testing.assert_allclose(strips[0, 1], object_pos[1])
+
+
+def test_object_object_spring_row_indices_matches_stretch_filter():
+    """Same rows as log_springs_by_stretch uses for object–object springs."""
+    springs = np.array([[0, 1], [1, 4], [2, 3]], dtype=np.int32)
+    idx = object_object_spring_row_indices(springs, num_object_vertices=3)
+    np.testing.assert_array_equal(idx, np.array([0], dtype=np.int64))
 
 
 def test_build_spring_strips_raises_on_out_of_bounds_index():
@@ -176,14 +184,14 @@ def test_log_points_and_springs_handles_empty_springs_and_controls():
 
 
 def test_compute_spring_colors_from_stretch_comparative():
-    """With percentile norm: smallest ratio -> blue, largest -> red."""
+    """With percentile norm: smallest ratio -> dark red, largest -> bright orange."""
     ratios = np.array([0.5, 0.8, 1.2], dtype=np.float32)
     colors = compute_spring_colors_from_stretch(ratios)
     assert colors.shape == (3, 4)
     assert colors.dtype == np.uint8
-    # Smallest (0.5) should be bluer than largest (1.2)
-    assert colors[0, 2] >= colors[0, 0]  # first is blue-ish
-    assert colors[2, 0] >= colors[2, 2]  # last is red-ish
+    # Highest stretch ratio should be brighter / more orange (higher R than lowest)
+    assert colors[2, 0] > colors[0, 0]
+    assert colors[2, 1] > colors[0, 1]
 
 
 def test_compute_spring_colors_from_stretch_uniform():
@@ -256,5 +264,3 @@ def test_log_springs_by_stretch_smoke():
         springs=springs,
         rest_lengths=rest_lengths,
     )
-
-

@@ -1,15 +1,19 @@
+"""Rerun logging for PhysTwin spring–mass state.
+
+Pure NumPy helpers (strips, stretch ratios, colors) → Warp/torch where needed → ``rerun`` entities.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 import numpy as np
-
-_SPRING_LEGEND_LOGGED = False
-_PHYSICS_LEGEND_LOGGED = False
 import rerun as rr
 import torch
 import warp as wp
+
+_SPRING_LEGEND_LOGGED = False
+_PHYSICS_LEGEND_LOGGED = False
 
 
 def _to_numpy_vec3(wp_array: wp.array, requires_grad: bool = False) -> np.ndarray:
@@ -21,7 +25,7 @@ def _to_numpy_vec3(wp_array: wp.array, requires_grad: bool = False) -> np.ndarra
 
 def build_spring_strips(
     object_positions: np.ndarray,
-    controller_positions: Optional[np.ndarray],
+    controller_positions: np.ndarray | None,
     springs: np.ndarray,
     num_object_points: int,
 ) -> np.ndarray:
@@ -50,26 +54,38 @@ def build_spring_strips(
     return strips
 
 
+def object_object_spring_row_indices(
+    springs: np.ndarray,
+    num_object_vertices: int,
+) -> np.ndarray:
+    """Row indices of springs whose both endpoints are object vertices (not controllers).
+
+    Matches stretch coloring and global color-range collection.
+    """
+    if springs.size == 0:
+        return np.zeros((0,), dtype=np.int64)
+    rows: list[int] = []
+    for i in range(springs.shape[0]):
+        a, b = int(springs[i, 0]), int(springs[i, 1])
+        if a < num_object_vertices and b < num_object_vertices:
+            rows.append(i)
+    return np.array(rows, dtype=np.int64)
+
+
 def compute_stretch_ratios(
     object_positions: np.ndarray,
-    controller_positions: Optional[np.ndarray],
+    controller_positions: np.ndarray | None,
     springs: np.ndarray,
     rest_lengths: np.ndarray,
 ) -> np.ndarray:
     """Compute current_len/rest for each spring. Returns (n_springs,) float32."""
     # Validate inputs: NaN here would propagate and cause black colors
     if np.any(~np.isfinite(object_positions)):
-        raise ValueError(
-            "object_positions contains NaN/inf; simulator state may be invalid"
-        )
+        raise ValueError("object_positions contains NaN/inf; simulator state may be invalid")
     if controller_positions is not None and np.any(~np.isfinite(controller_positions)):
-        raise ValueError(
-            "controller_positions contains NaN/inf"
-        )
+        raise ValueError("controller_positions contains NaN/inf")
     if np.any(~np.isfinite(rest_lengths)):
-        raise ValueError(
-            "rest_lengths contains NaN/inf; check wp_rest_lengths"
-        )
+        raise ValueError("rest_lengths contains NaN/inf; check wp_rest_lengths")
     strips = build_spring_strips(
         object_positions, controller_positions, springs, object_positions.shape[0]
     )
@@ -88,8 +104,8 @@ def _normalize_percentile(
     vals: np.ndarray,
     low_pct: float = 2.0,
     high_pct: float = 98.0,
-    v_low: Optional[float] = None,
-    v_high: Optional[float] = None,
+    v_low: float | None = None,
+    v_high: float | None = None,
 ) -> np.ndarray:
     """Normalize values to [0, 1]. Use v_low/v_high if provided (global), else percentile."""
     vals = np.asarray(vals, dtype=np.float32)
@@ -126,9 +142,7 @@ def _value_to_color_stretch(x: np.ndarray) -> np.ndarray:
     """Map [0,1] to RGBA: dark red (compressed) -> bright orange (stretched). Red-orange spectrum, light-dark contrast."""
     x = np.asarray(x, dtype=np.float32)
     if np.any(~np.isfinite(x)):
-        raise ValueError(
-            "Stretch normalization produced NaN/inf; check ratios and global range"
-        )
+        raise ValueError("Stretch normalization produced NaN/inf; check ratios and global range")
     x = np.clip(x, 0.0, 1.0)
     # Dark red (100, 25, 20) -> bright orange (255, 165, 60)
     r = np.clip(100.0 + 155.0 * x, 0.0, 255.0)
@@ -141,8 +155,8 @@ def _value_to_color_stretch(x: np.ndarray) -> np.ndarray:
 
 def compute_spring_colors_from_stiffness(
     stiffness: np.ndarray,
-    v_low: Optional[float] = None,
-    v_high: Optional[float] = None,
+    v_low: float | None = None,
+    v_high: float | None = None,
 ) -> np.ndarray:
     """Map stiffness to RGBA: blue (soft) -> purple -> red (stiff)."""
     if stiffness.size == 0:
@@ -153,8 +167,8 @@ def compute_spring_colors_from_stiffness(
 
 def compute_spring_colors_from_stretch(
     ratios: np.ndarray,
-    v_low: Optional[float] = None,
-    v_high: Optional[float] = None,
+    v_low: float | None = None,
+    v_high: float | None = None,
 ) -> np.ndarray:
     """Map stretch ratio to RGBA: dark red (compressed) -> bright orange (stretched)."""
     if ratios.size == 0:
@@ -170,9 +184,9 @@ def compute_spring_colors_from_stretch(
 class GlobalColorRanges:
     """Optional fixed (v_low, v_high) for normalization across time. None = per-frame percentile."""
 
-    stiffness: Optional[Tuple[float, float]] = None
-    stretch: Optional[Tuple[float, float]] = None
-    mass: Optional[Tuple[float, float]] = None
+    stiffness: tuple[float, float] | None = None
+    stretch: tuple[float, float] | None = None
+    mass: tuple[float, float] | None = None
 
 
 def compute_global_color_ranges(
@@ -183,7 +197,8 @@ def compute_global_color_ranges(
     high_pct: float = 98.0,
 ) -> GlobalColorRanges:
     """Compute (v_low, v_high) percentiles from arrays collected across all frames."""
-    def _range(arr: np.ndarray) -> Optional[Tuple[float, float]]:
+
+    def _range(arr: np.ndarray) -> tuple[float, float] | None:
         a = np.asarray(arr, dtype=np.float32).flatten()
         a = a[np.isfinite(a)]
         if a.size == 0:
@@ -214,7 +229,7 @@ class SpringMassLoggingOptions:
     ground_plane: bool = True
     velocity_scale: float = 0.05
     force_scale: float = 1e-4
-    global_ranges: Optional[GlobalColorRanges] = None
+    global_ranges: GlobalColorRanges | None = None
 
 
 def log_velocities(
@@ -243,10 +258,10 @@ def log_forces(
 
 def log_springs_by_stretch(
     object_positions: np.ndarray,
-    controller_positions: Optional[np.ndarray],
+    controller_positions: np.ndarray | None,
     springs: np.ndarray,
     rest_lengths: np.ndarray,
-    stretch_range: Optional[Tuple[float, float]] = None,
+    stretch_range: tuple[float, float] | None = None,
 ) -> None:
     """Log springs colored by stretch ratio to physics/springs_stretch. Dark red (compressed) -> bright orange (stretched).
     Only object-object springs (both endpoints are object vertices); no control-related springs."""
@@ -257,14 +272,10 @@ def log_springs_by_stretch(
             "object_positions or rest_lengths contains NaN/inf; simulator state may be invalid"
         )
     num_obj = object_positions.shape[0]
-    in_obj = lambda idx: idx < num_obj
-    # Only object-object: both endpoints must be object vertices
-    keep = [
-        i for i in range(springs.shape[0])
-        if in_obj(int(springs[i, 0])) and in_obj(int(springs[i, 1]))
-    ]
-    if not keep:
+    keep_arr = object_object_spring_row_indices(springs, num_obj)
+    if keep_arr.size == 0:
         return
+    keep = [int(i) for i in keep_arr]
     springs_sub = springs[keep]
     rest_sub = rest_lengths[keep]
     strips = build_spring_strips(
@@ -274,8 +285,8 @@ def log_springs_by_stretch(
         num_object_points=num_obj,
     )
     ratios = np.zeros(len(keep), dtype=np.float32)
-    for j, i in enumerate(keep):
-        rest = float(rest_lengths[i])
+    for j in range(len(keep)):
+        rest = float(rest_sub[j])
         if rest > 1e-8:
             current_len = float(np.linalg.norm(strips[j, 1] - strips[j, 0]))
             ratios[j] = current_len / rest
@@ -296,7 +307,7 @@ def log_masses(
     masses: np.ndarray,
     min_radius: float = 0.001,
     max_radius: float = 0.006,
-    mass_range: Optional[Tuple[float, float]] = None,
+    mass_range: tuple[float, float] | None = None,
 ) -> None:
     """Log nodes with radii and colors proportional to mass (percentile-normalized).
 
@@ -354,11 +365,20 @@ def log_control_interpolation(
             "controls/interpolation/target",
             rr.Points3D(positions=target_control, radii=0.004, colors=[0, 0, 255, 255]),
         )
-    if orig_control.size > 0 and target_control.size > 0 and orig_control.shape == target_control.shape:
-        strips = [np.array([orig_control[i], target_control[i]], dtype=np.float32) for i in range(orig_control.shape[0])]
+    if (
+        orig_control.size > 0
+        and target_control.size > 0
+        and orig_control.shape == target_control.shape
+    ):
+        strips = [
+            np.array([orig_control[i], target_control[i]], dtype=np.float32)
+            for i in range(orig_control.shape[0])
+        ]
         rr.log(
             "controls/interpolation/links",
-            rr.LineStrips3D(strips=strips, colors=np.array([[200, 200, 0, 200]] * len(strips), dtype=np.uint8)),
+            rr.LineStrips3D(
+                strips=strips, colors=np.array([[200, 200, 0, 200]] * len(strips), dtype=np.uint8)
+            ),
         )
 
 
@@ -381,12 +401,12 @@ def log_ground_plane(
 
 def log_points_and_springs(
     object_positions: np.ndarray,
-    controller_positions: Optional[np.ndarray],
+    controller_positions: np.ndarray | None,
     springs: np.ndarray,
-    stiffness: Optional[np.ndarray],
+    stiffness: np.ndarray | None,
     frame_idx: int,
     timeline: str = "frame",
-    stiffness_range: Optional[Tuple[float, float]] = None,
+    stiffness_range: tuple[float, float] | None = None,
 ) -> None:
     """Log one frame of nodes, controls, and springs to Rerun.
 
@@ -433,11 +453,13 @@ def log_points_and_springs(
         stiff_ctrl_obj = []
         stiff_ctrl_ctrl = []
 
+        def _vertex_is_object(idx: int) -> bool:
+            return idx < num_obj
+
         for i in range(springs.shape[0]):
             a, b = int(springs[i, 0]), int(springs[i, 1])
-            in_obj = lambda idx: idx < num_obj
-            a_obj = in_obj(a)
-            b_obj = in_obj(b)
+            a_obj = _vertex_is_object(a)
+            b_obj = _vertex_is_object(b)
             if a_obj and b_obj:
                 obj_obj.append(i)
                 if stiffness is not None:
@@ -453,14 +475,16 @@ def log_points_and_springs(
 
         v_low, v_high = stiffness_range if stiffness_range else (None, None)
 
-        def _log_springs(path: str, idxs: list, color_override: Optional[tuple] = None) -> None:
+        def _log_springs(path: str, idxs: list, color_override: tuple | None = None) -> None:
             if not idxs:
                 return
             s = [strips[i] for i in idxs]
             if color_override is not None:
                 col = np.array([color_override] * len(s), dtype=np.uint8)
             elif path == "world/springs/object_object" and stiff_obj_obj:
-                col = compute_spring_colors_from_stiffness(np.array(stiff_obj_obj), v_low=v_low, v_high=v_high)
+                col = compute_spring_colors_from_stiffness(
+                    np.array(stiff_obj_obj), v_low=v_low, v_high=v_high
+                )
             else:
                 col = None
             rr.log(path, rr.LineStrips3D(strips=s, colors=col))
@@ -496,9 +520,9 @@ def log_points_and_springs(
 def log_spring_mass_frame(
     simulator,
     frame_idx: int,
-    controller_positions: Optional[torch.Tensor] = None,
+    controller_positions: torch.Tensor | None = None,
     timeline: str = "frame",
-    options: Optional[SpringMassLoggingOptions] = None,
+    options: SpringMassLoggingOptions | None = None,
 ) -> None:
     """Convenience wrapper: extract data from SpringMassSystemWarp and log to Rerun.
 
@@ -527,7 +551,7 @@ def log_spring_mass_frame(
     spring_Y = spring_Y_torch.detach().cpu().numpy()
     stiffness = np.exp(spring_Y).astype(np.float32)
 
-    ctrl_np: Optional[np.ndarray]
+    ctrl_np: np.ndarray | None
     if controller_positions is not None:
         assert controller_positions.ndim == 2 and controller_positions.shape[1] == 3
         ctrl_np = controller_positions.detach().cpu().numpy()
@@ -554,16 +578,24 @@ def log_spring_mass_frame(
         forces = _to_numpy_vec3(simulator.wp_states[-1].wp_vertice_forces, requires_grad=False)
         log_forces(object_positions, forces, opts.force_scale)
     if opts.spring_stretch:
-        rest_lengths = wp.to_torch(simulator.wp_rest_lengths, requires_grad=False).detach().cpu().numpy()
+        rest_lengths = (
+            wp.to_torch(simulator.wp_rest_lengths, requires_grad=False).detach().cpu().numpy()
+        )
         stretch_range = gr.stretch if gr else None
-        log_springs_by_stretch(object_positions, ctrl_np, springs, rest_lengths, stretch_range=stretch_range)
+        log_springs_by_stretch(
+            object_positions, ctrl_np, springs, rest_lengths, stretch_range=stretch_range
+        )
     if opts.masses:
         masses = wp.to_torch(simulator.wp_masses, requires_grad=False).detach().cpu().numpy()
         mass_range = gr.mass if gr else None
         log_masses(object_positions, masses, mass_range=mass_range)
     if opts.collisions and getattr(simulator, "object_collision_flag", 0):
-        coll_idx = wp.to_torch(simulator.wp_collision_indices, requires_grad=False).detach().cpu().numpy()
-        coll_num = wp.to_torch(simulator.wp_collision_number, requires_grad=False).detach().cpu().numpy()
+        coll_idx = (
+            wp.to_torch(simulator.wp_collision_indices, requires_grad=False).detach().cpu().numpy()
+        )
+        coll_num = (
+            wp.to_torch(simulator.wp_collision_number, requires_grad=False).detach().cpu().numpy()
+        )
         log_collisions(object_positions, coll_idx, coll_num)
     if opts.control_interpolation and ctrl_np is not None and simulator.num_control_points > 0:
         orig = _to_numpy_vec3(simulator.wp_original_control_point, requires_grad=False)
@@ -585,4 +617,3 @@ def log_spring_mass_frame(
                 "physics/collisions: collision pairs. controls/interpolation: original vs target."
             ),
         )
-
