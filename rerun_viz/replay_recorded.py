@@ -3,19 +3,33 @@ from __future__ import annotations
 import glob
 import json
 import os
+import sys
+import time
 from argparse import ArgumentParser
-from typing import Optional
+from typing import List, Optional
+
+# Ensure project root is on sys.path so qqtt is importable when run from anywhere
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 import numpy as np
 import rerun as rr
 import torch
 import warp as wp
+from tqdm import tqdm
 
 from qqtt import InvPhyTrainerWarp
 from qqtt.utils import cfg, logger
 from rerun_viz.connect_instructions import JTAP_STYLE_SSH, REMOTE_LIVE_SERVE_SSH
 from rerun_viz.port_util import pick_free_port, port_free
-from rerun_viz.spring_mass_logging import log_spring_mass_frame
+from rerun_viz.spring_mass_logging import (
+    GlobalColorRanges,
+    SpringMassLoggingOptions,
+    compute_global_color_ranges,
+    compute_stretch_ratios,
+    log_spring_mass_frame,
+)
 
 
 def set_all_seeds(seed: int = 42) -> None:
@@ -115,6 +129,46 @@ def load_trainer_and_model(
     return trainer
 
 
+def collect_global_color_ranges(
+    trainer: InvPhyTrainerWarp,
+    start_frame: int,
+    end_frame: int,
+) -> GlobalColorRanges:
+    """Pre-pass: run simulator through frames and collect stiffness, stretch, mass for across-time normalization."""
+    sim = trainer.simulator
+    controller_points = sim.controller_points
+    assert controller_points is not None
+
+    springs_t = wp.to_torch(sim.wp_springs, requires_grad=False).detach().cpu().numpy()
+    rest_lengths = wp.to_torch(sim.wp_rest_lengths, requires_grad=False).detach().cpu().numpy()
+    spring_Y = wp.to_torch(sim.wp_spring_Y, requires_grad=False).detach().cpu().numpy()
+    stiffness = np.exp(spring_Y).astype(np.float32)
+    masses = wp.to_torch(sim.wp_masses, requires_grad=False).detach().cpu().numpy().astype(np.float32)
+
+    stretch_list: List[np.ndarray] = []
+
+    sim.set_init_state(sim.wp_init_vertices, sim.wp_init_velocities, pure_inference=True)
+    for frame_idx in range(start_frame, end_frame + 1):
+        sim.set_controller_target(frame_idx, pure_inference=True)
+        if sim.object_collision_flag:
+            sim.update_collision_graph()
+        if cfg.use_graph and hasattr(sim, "forward_graph"):
+            wp.capture_launch(sim.forward_graph)
+        else:
+            sim.step()
+        obj_pos = wp.to_torch(sim.wp_states[-1].wp_x, requires_grad=False).detach().cpu().numpy()
+        ctrl_pos = controller_points[frame_idx].detach().cpu().numpy()
+        ratios = compute_stretch_ratios(obj_pos, ctrl_pos, springs_t, rest_lengths)
+        # Only object-object springs (same filter as log_springs_by_stretch)
+        num_obj = obj_pos.shape[0]
+        keep = [i for i in range(springs_t.shape[0]) if int(springs_t[i, 0]) < num_obj and int(springs_t[i, 1]) < num_obj]
+        stretch_list.append(ratios[keep])
+        sim.set_init_state(sim.wp_states[-1].wp_x, sim.wp_states[-1].wp_v, pure_inference=True)
+
+    stretch_all = np.concatenate(stretch_list, axis=0) if stretch_list else np.array([], dtype=np.float32)
+    return compute_global_color_ranges(stiffness, stretch_all, masses)
+
+
 def replay_with_rerun(
     trainer: InvPhyTrainerWarp,
     start_frame: int = 1,
@@ -127,6 +181,8 @@ def replay_with_rerun(
     connect_url: Optional[str] = None,
     output_rrd: Optional[str] = None,
     case_name: Optional[str] = None,
+    logging_options: Optional[SpringMassLoggingOptions] = None,
+    global_normalization: bool = True,
 ) -> None:
     """Replay a sequence driven by recorded controller_points and stream to Rerun.
 
@@ -147,6 +203,24 @@ def replay_with_rerun(
         end_frame = total_frames - 1
     else:
         end_frame = min(total_frames - 1, start_frame + max_frames - 1)
+
+    opts = logging_options or SpringMassLoggingOptions()
+    if global_normalization:
+        logger.info("[RERUN-REPLAY] Pre-pass: collecting global color ranges across time...")
+        gr = collect_global_color_ranges(trainer, start_frame, end_frame)
+        opts = SpringMassLoggingOptions(
+            velocities=opts.velocities,
+            forces=opts.forces,
+            spring_stretch=opts.spring_stretch,
+            masses=opts.masses,
+            collisions=opts.collisions,
+            control_interpolation=opts.control_interpolation,
+            ground_plane=opts.ground_plane,
+            velocity_scale=opts.velocity_scale,
+            force_scale=opts.force_scale,
+            global_ranges=gr,
+        )
+        logger.info(f"[RERUN-REPLAY] Global ranges: stiffness={gr.stiffness} stretch={gr.stretch} mass={gr.mass}")
 
     logger.info(
         f"[RERUN-REPLAY] Replaying frames {start_frame}..{end_frame} "
@@ -216,26 +290,36 @@ def replay_with_rerun(
         pure_inference=True,
     )
 
-    for frame_idx in range(start_frame, end_frame + 1):
+    num_frames = end_frame - start_frame + 1
+    n_vertices = simulator.n_vertices
+    n_springs = simulator.n_springs
+    num_substeps = simulator.num_substeps
+
+    frame_range = range(start_frame, end_frame + 1)
+    t_physics_total = 0.0
+    for frame_idx in tqdm(frame_range, desc="Replaying frames", unit="frame"):
         # Set controller targets for this frame pair
         simulator.set_controller_target(frame_idx, pure_inference=True)
 
         if simulator.object_collision_flag:
             simulator.update_collision_graph()
 
-        # Advance one frame of physics
+        # Advance one frame of physics (only this is timed; excludes setup + Rerun I/O)
+        t_phys_start = time.perf_counter()
         if cfg.use_graph and hasattr(simulator, "forward_graph"):
             wp.capture_launch(simulator.forward_graph)
         else:
             simulator.step()
+        t_physics_total += time.perf_counter() - t_phys_start
 
-        # Log current state to Rerun
+        # Log current state to Rerun (not included in physics timing)
         current_ctrl = controller_points[frame_idx]
         log_spring_mass_frame(
             simulator=simulator,
             frame_idx=frame_idx,
             controller_positions=current_ctrl,
             timeline="frame",
+            options=opts,
         )
 
         # Use the last state as the starting point for the next frame
@@ -244,6 +328,25 @@ def replay_with_rerun(
             simulator.wp_states[-1].wp_v,
             pure_inference=True,
         )
+
+    fps_physics = num_frames / t_physics_total if t_physics_total > 0 else 0.0
+    ms_per_frame_physics = 1000.0 * t_physics_total / num_frames if num_frames > 0 else 0.0
+
+    total_substeps = num_frames * num_substeps
+    substeps_per_sec = total_substeps / t_physics_total if t_physics_total > 0 else 0.0
+
+    print("\n" + "=" * 60, flush=True)
+    print("  PHYS-TWIN REPLAY PERFORMANCE (physics forward only, excl. Rerun I/O)", flush=True)
+    print("=" * 60, flush=True)
+    print(f"  Spring-mass model:", flush=True)
+    print(f"    vertices: {n_vertices:,}   springs: {n_springs:,}   substeps/frame: {num_substeps}", flush=True)
+    print(f"  Physics forward:", flush=True)
+    print(f"    frames:       {num_frames} (frame {start_frame} .. {end_frame})", flush=True)
+    print(f"    physics time: {t_physics_total:.2f} s", flush=True)
+    print(f"    frame FPS:    {fps_physics:.1f} frames/s", flush=True)
+    print(f"    per frame:    {ms_per_frame_physics:.2f} ms", flush=True)
+    print(f"    substep rate: {substeps_per_sec:,.0f} substeps/s", flush=True)
+    print("=" * 60 + "\n", flush=True)
 
     logger.info("[RERUN-REPLAY] Finished streaming to Rerun.")
 
@@ -310,7 +413,102 @@ def main() -> None:
         help="Optional URL for rr.connect_grpc() when --rerun_mode=connect "
         "(default: rerun+http://127.0.0.1:9876/proxy).",
     )
+    parser.add_argument(
+        "--no-velocities",
+        action="store_true",
+        help="Disable physics/velocities view.",
+    )
+    parser.add_argument(
+        "--no-forces",
+        action="store_true",
+        help="Disable physics/forces view.",
+    )
+    parser.add_argument(
+        "--no-spring-stretch",
+        action="store_true",
+        help="Disable physics/springs_stretch view.",
+    )
+    parser.add_argument(
+        "--no-masses",
+        action="store_true",
+        help="Disable physics/masses view.",
+    )
+    parser.add_argument(
+        "--no-collisions",
+        action="store_true",
+        help="Disable physics/collisions view.",
+    )
+    parser.add_argument(
+        "--no-control-interpolation",
+        action="store_true",
+        help="Disable controls/interpolation view.",
+    )
+    parser.add_argument(
+        "--no-ground-plane",
+        action="store_true",
+        help="Disable world/ground plane.",
+    )
+    parser.add_argument(
+        "--velocity-scale",
+        type=float,
+        default=0.05,
+        help="Scale for velocity arrows (default: 0.05).",
+    )
+    parser.add_argument(
+        "--force-scale",
+        type=float,
+        default=1e-4,
+        help="Scale for force arrows (default: 1e-4).",
+    )
+    parser.add_argument(
+        "--minimal",
+        action="store_true",
+        help="Log only original views (nodes, controls, springs). Disable physics/controls/ground views.",
+    )
+    parser.add_argument(
+        "--medium",
+        action="store_true",
+        help="Intermediate: original + spring stretch + masses + ground. Skip forces, velocities, collisions, control interpolation.",
+    )
+    parser.add_argument(
+        "--no-global-normalization",
+        action="store_true",
+        help="Disable across-time color normalization (default: on). Use per-frame percentile instead.",
+    )
     args = parser.parse_args()
+
+    if args.minimal:
+        logging_options = SpringMassLoggingOptions(
+            velocities=False,
+            forces=False,
+            spring_stretch=False,
+            masses=False,
+            collisions=False,
+            control_interpolation=False,
+            ground_plane=False,
+        )
+    elif args.medium:
+        logging_options = SpringMassLoggingOptions(
+            velocities=False,
+            forces=False,
+            spring_stretch=True,
+            masses=True,
+            collisions=False,
+            control_interpolation=False,
+            ground_plane=True,
+        )
+    else:
+        logging_options = SpringMassLoggingOptions(
+            velocities=not args.no_velocities,
+            forces=not args.no_forces,
+            spring_stretch=not args.no_spring_stretch,
+            masses=not args.no_masses,
+            collisions=not args.no_collisions,
+            control_interpolation=not args.no_control_interpolation,
+            ground_plane=not args.no_ground_plane,
+            velocity_scale=args.velocity_scale,
+            force_scale=args.force_scale,
+        )
 
     set_all_seeds(42)
     load_config_and_camera(args.base_path, args.case_name)
@@ -326,6 +524,8 @@ def main() -> None:
         connect_url=args.connect_url,
         output_rrd=args.output_rrd,
         case_name=args.case_name,
+        logging_options=logging_options,
+        global_normalization=not args.no_global_normalization,
     )
 
 

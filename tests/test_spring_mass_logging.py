@@ -14,7 +14,11 @@ if str(PROJECT_ROOT) not in sys.path:
 from rerun_viz.spring_mass_logging import (  # noqa: E402
     build_spring_strips,
     compute_spring_colors_from_stiffness,
+    compute_spring_colors_from_stretch,
+    log_forces,
     log_points_and_springs,
+    log_springs_by_stretch,
+    log_velocities,
 )
 
 
@@ -168,6 +172,89 @@ def test_log_points_and_springs_handles_empty_springs_and_controls():
         stiffness=stiffness,
         frame_idx=1,
         timeline="frame",
+    )
+
+
+def test_compute_spring_colors_from_stretch_comparative():
+    """With percentile norm: smallest ratio -> blue, largest -> red."""
+    ratios = np.array([0.5, 0.8, 1.2], dtype=np.float32)
+    colors = compute_spring_colors_from_stretch(ratios)
+    assert colors.shape == (3, 4)
+    assert colors.dtype == np.uint8
+    # Smallest (0.5) should be bluer than largest (1.2)
+    assert colors[0, 2] >= colors[0, 0]  # first is blue-ish
+    assert colors[2, 0] >= colors[2, 2]  # last is red-ish
+
+
+def test_compute_spring_colors_from_stretch_uniform():
+    """When all ratios equal, get mid color."""
+    ratios = np.array([1.0, 1.0], dtype=np.float32)
+    colors = compute_spring_colors_from_stretch(ratios)
+    assert colors.shape == (2, 4)
+    assert np.allclose(colors[0], colors[1])
+
+
+def test_compute_spring_colors_from_stretch_empty():
+    ratios = np.array([], dtype=np.float32)
+    colors = compute_spring_colors_from_stretch(ratios)
+    assert colors.shape == (0, 4)
+
+
+def test_collision_pair_extraction():
+    """Extract (i,j) pairs from collision_indices/collision_number, avoiding duplicates."""
+    positions = np.array(
+        [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        dtype=np.float32,
+    )
+    # Simulate: point 0 has neighbors 1,2; point 1 has neighbor 0; point 2 has neighbor 0
+    # collision_indices[i, k] = neighbor index. We only add when i < j to avoid (i,j) and (j,i).
+    collision_indices = np.zeros((3, 500), dtype=np.int32)
+    collision_number = np.array([2, 1, 1], dtype=np.int32)
+    collision_indices[0, 0] = 1
+    collision_indices[0, 1] = 2
+    collision_indices[1, 0] = 0
+    collision_indices[2, 0] = 0
+
+    from rerun_viz.spring_mass_logging import log_collisions
+
+    rr.init("test_collisions", spawn=False, default_enabled=True)
+    rr.set_time("frame", sequence=0)
+    log_collisions(positions, collision_indices, collision_number)
+    # Should not raise; we're testing the logic runs. Exact strip count: (0,1), (0,2) since we add when i<j.
+
+
+def test_log_velocities_arrows():
+    """log_velocities produces Arrows3D from positions and scaled vectors."""
+    rr.init("test_velocities", spawn=False, default_enabled=True)
+    rr.set_time("frame", sequence=0)
+    positions = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float32)
+    velocities = np.array([[1, 0, 0], [0, 1, 0]], dtype=np.float32)
+    log_velocities(positions, velocities, scale=0.1)
+    # Should not raise
+
+
+def test_log_forces_arrows():
+    """log_forces produces Arrows3D from positions and scaled vectors."""
+    rr.init("test_forces", spawn=False, default_enabled=True)
+    rr.set_time("frame", sequence=0)
+    positions = np.array([[0, 0, 0]], dtype=np.float32)
+    forces = np.array([[100, 0, 0]], dtype=np.float32)
+    log_forces(positions, forces, scale=1e-4)
+    # Should not raise
+
+
+def test_log_springs_by_stretch_smoke():
+    """log_springs_by_stretch runs without error for simple inputs."""
+    rr.init("test_stretch", spawn=False, default_enabled=True)
+    rr.set_time("frame", sequence=0)
+    object_pos = np.array([[0, 0, 0], [1, 0, 0]], dtype=np.float32)
+    springs = np.array([[0, 1]], dtype=np.int32)
+    rest_lengths = np.array([1.0], dtype=np.float32)
+    log_springs_by_stretch(
+        object_positions=object_pos,
+        controller_positions=None,
+        springs=springs,
+        rest_lengths=rest_lengths,
     )
 
 
