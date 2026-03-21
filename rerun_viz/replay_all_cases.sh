@@ -63,7 +63,8 @@ for case_dir in "$BASE_PATH"/*/; do
     --case_name "$case_name" \
     --rerun_mode file \
     --output-rrd "$out_rrd" \
-    $REPLAY_OPTS; then
+    $REPLAY_OPTS
+  then
     echo "[OK] $case_name"
   else
     echo "[FAIL] $case_name (continuing to next)"
