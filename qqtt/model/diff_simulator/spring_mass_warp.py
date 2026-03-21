@@ -788,8 +788,10 @@ class SpringMassSystemWarp:
 
         # Create the CUDA graph to acclerate
         if cfg.use_graph:
+            logger.info("[SIMULATION]: Creating CUDA graphs...")
             if cfg.data_type == "real":
                 if not disable_backward:
+                    logger.info("[SIMULATION]: Capturing graph with backward pass...")
                     with wp.ScopedCapture() as capture:
                         self.tape = wp.Tape()
                         with self.tape:
@@ -797,13 +799,16 @@ class SpringMassSystemWarp:
                             self.calculate_loss()
                         self.tape.backward(self.loss)
                 else:
+                    logger.info("[SIMULATION]: Capturing graph without backward pass...")
                     with wp.ScopedCapture() as capture:
                         self.step()
                         self.calculate_loss()
                 self.graph = capture.graph
+                logger.info("[SIMULATION]: Main graph captured")
             elif cfg.data_type == "synthetic":
                 if not disable_backward:
                     # For synthetic data, we compute simple loss
+                    logger.info("[SIMULATION]: Capturing synthetic graph with backward pass...")
                     with wp.ScopedCapture() as capture:
                         self.tape = wp.Tape()
                         with self.tape:
@@ -811,16 +816,20 @@ class SpringMassSystemWarp:
                             self.calculate_simple_loss()
                         self.tape.backward(self.loss)
                 else:
+                    logger.info("[SIMULATION]: Capturing synthetic graph without backward pass...")
                     with wp.ScopedCapture() as capture:
                         self.step()
                         self.calculate_simple_loss()
                 self.graph = capture.graph
+                logger.info("[SIMULATION]: Main graph captured")
             else:
                 raise NotImplementedError
 
+            logger.info("[SIMULATION]: Capturing forward graph...")
             with wp.ScopedCapture() as forward_capture:
                 self.step()
             self.forward_graph = forward_capture.graph
+            logger.info("[SIMULATION]: Forward graph captured - initialization complete")
         else:
             self.tape = wp.Tape()
 

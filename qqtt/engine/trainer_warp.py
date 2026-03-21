@@ -165,6 +165,7 @@ class InvPhyTrainerWarp:
             gt_object_visibilities=self.object_visibilities,
             gt_object_motions_valid=self.object_motions_valid,
             self_collision=cfg.self_collision,
+            disable_backward=pure_inference_mode,  # Disable backward pass in inference mode
         )
 
         if not pure_inference_mode:

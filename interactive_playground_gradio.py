@@ -1,6 +1,95 @@
 """author: Can Li, 2025-12-27"""
 
+# CRITICAL: Set up warning suppression BEFORE any other imports
+# Warp warnings are triggered during import, so we must filter them first
+import warnings
+import sys
 import os
+
+# Suppress noisy but harmless Warp tape warnings about set_control_points
+# Set environment variable to suppress Warp warnings if supported
+os.environ.setdefault("WARP_SILENT", "1")
+
+# Filter Python warnings with multiple patterns
+warnings.filterwarnings("ignore", message=".*set_control_points.*")
+warnings.filterwarnings("ignore", message=".*enable_backward.*")
+warnings.filterwarnings("ignore", message=".*Running the tape backwards.*")
+warnings.filterwarnings("ignore", category=UserWarning)
+
+# Intercept stderr to filter Warp warnings (they may print directly to stderr)
+_original_stderr = sys.stderr
+
+class FilteredStderr:
+    def __init__(self, original_stderr):
+        self.original_stderr = original_stderr
+        self.buffer = ""  # Buffer for multi-line warnings
+        
+    def write(self, text):
+        # Filter out Warp warnings about set_control_points
+        text_str = str(text)
+        
+        # Add to buffer for multi-line messages
+        self.buffer += text_str
+        
+        # Check if buffer contains the warning pattern (check both buffer and current text)
+        combined = self.buffer + text_str
+        if ("set_control_points" in combined and "enable_backward" in combined) or \
+           ("Warp UserWarning" in combined and "set_control_points" in combined) or \
+           ("Running the tape backwards" in combined and "set_control_points" in combined):
+            # Check if this is a complete warning line
+            if '\n' in text_str or '\r' in text_str:
+                self.buffer = ""  # Clear buffer, suppress this warning
+                return
+            # Partial write of warning, keep buffering but don't write yet
+            return
+        
+        # If we have a complete line (ends with newline), check and flush
+        if text_str.endswith('\n') or text_str.endswith('\r\n') or '\n' in text_str:
+            # Split by newlines and check each line
+            lines = self.buffer.split('\n')
+            self.buffer = ""
+            for line in lines[:-1]:  # All but last (which might be incomplete)
+                # Check if this line is a warning
+                if not (("set_control_points" in line and "enable_backward" in line) or
+                        ("Warp UserWarning" in line and "set_control_points" in line) or
+                        ("Running the tape backwards" in line and "set_control_points" in line)):
+                    self.original_stderr.write(line + '\n')
+            # Keep the last part in buffer if it doesn't end with newline
+            if not text_str.endswith('\n') and not text_str.endswith('\r\n'):
+                self.buffer = lines[-1] if lines else ""
+        elif text_str:  # Partial write, keep buffering
+            pass  # Already added to buffer above
+        
+    def flush(self):
+        if self.buffer:
+            # Check buffer before flushing
+            if not ("set_control_points" in self.buffer and "enable_backward" in self.buffer):
+                if not ("Warp UserWarning" in self.buffer and "set_control_points" in self.buffer):
+                    if not ("Running the tape backwards" in self.buffer and "set_control_points" in self.buffer):
+                        self.original_stderr.write(self.buffer)
+            self.buffer = ""
+        self.original_stderr.flush()
+        
+    def __getattr__(self, name):
+        return getattr(self.original_stderr, name)
+
+# Replace stderr with filtered version immediately
+sys.stderr = FilteredStderr(_original_stderr)
+
+# Also override warnings.showwarning to catch warnings before they hit stderr
+_original_showwarning = warnings.showwarning
+def filtered_showwarning(message, category, filename, lineno, file=None, line=None):
+    msg_str = str(message)
+    if "set_control_points" in msg_str and "enable_backward" in msg_str:
+        return  # Suppress
+    if "Warp UserWarning" in msg_str and "set_control_points" in msg_str:
+        return  # Suppress
+    if "Running the tape backwards" in msg_str and "set_control_points" in msg_str:
+        return  # Suppress
+    _original_showwarning(message, category, filename, lineno, file, line)
+warnings.showwarning = filtered_showwarning
+
+# Now import everything else
 from datetime import datetime
 import random
 import numpy as np
@@ -236,7 +325,20 @@ class GradioInteractivePlayground:
                 self.trainer.simulator.set_controller_interactive(prev_target, current_target)
                 if self.trainer.simulator.object_collision_flag:
                     self.trainer.simulator.update_collision_graph()
-                wp.capture_launch(self.trainer.simulator.forward_graph)
+                # Launch forward graph without gradient recording (inference mode)
+                # The issue: Warp tries to enable gradients when arrays have requires_grad=True,
+                # but set_control_points has enable_backward=False, causing a conflict.
+                # Solution: Temporarily disable tape to prevent gradient recording attempts
+                tape_backup = None
+                if hasattr(self.trainer.simulator, 'tape'):
+                    tape_backup = self.trainer.simulator.tape
+                    self.trainer.simulator.tape = None
+                try:
+                    wp.capture_launch(self.trainer.simulator.forward_graph)
+                finally:
+                    # Restore tape if it existed
+                    if tape_backup is not None:
+                        self.trainer.simulator.tape = tape_backup
                 x = wp.to_torch(self.trainer.simulator.wp_states[-1].wp_x, requires_grad=False)
                 self.trainer.simulator.set_init_state(
                     self.trainer.simulator.wp_states[-1].wp_x,
@@ -669,15 +771,19 @@ if __name__ == "__main__":
     gaussians_path = f"{args.gaussian_path}/{case_name}/{exp_name}/point_cloud/iteration_10000/point_cloud.ply"
 
     logger.set_log_file(path=base_dir, name="inference_log")
+    logger.info("[GRADIO] Creating trainer...")
     trainer = InvPhyTrainerWarp(
         data_path=f"{base_path}/{case_name}/final_data.pkl",
         base_dir=base_dir,
         pure_inference_mode=True,
     )
+    logger.info("[GRADIO] Trainer created successfully")
 
     best_model_path = glob.glob(f"experiments/{case_name}/train/best_*.pth")[0]
+    logger.info(f"[GRADIO] Loading model from: {best_model_path}")
     
     # Create Gradio playground
+    logger.info("[GRADIO] Creating Gradio playground...")
     playground = GradioInteractivePlayground(
         trainer,
         best_model_path,
@@ -685,17 +791,27 @@ if __name__ == "__main__":
         args.n_ctrl_parts,
         args.inv_ctrl,
     )
+    logger.info("[GRADIO] Playground created successfully")
     
     # Create and launch Gradio interface
+    logger.info("[GRADIO] Creating Gradio interface...")
     demo = create_gradio_interface(playground)
+    logger.info("[GRADIO] Interface created, launching server...")
 
-    # NOTE: Temporarily disable launch to debug LLVM CommandLine error.
-    # If running without launch works, the issue is likely triggered during Gradio server startup.
-    # Uncomment the lines below once the environment-side LLVM conflict is resolved.
-    #
-    # demo.launch(
-    #     server_name=args.server_name,
-    #     server_port=args.server_port,
-    #     share=args.share,
-    # )
+    # Launch Gradio server
+    logger.info(f"[GRADIO] Launching on {args.server_name}:{args.server_port}, share={args.share}")
+    import sys
+    sys.stderr.flush()
+    sys.stdout.flush()
+    print(f"\n{'='*60}", file=sys.stderr, flush=True)
+    print(f"[GRADIO] Starting server...", file=sys.stderr, flush=True)
+    print(f"{'='*60}\n", file=sys.stderr, flush=True)
+    # launch() returns (App, local_url, share_url) and blocks
+    # Gradio prints URLs to stdout/stderr when it starts
+    demo.launch(
+        server_name=args.server_name,
+        server_port=args.server_port,
+        share=args.share,
+        show_error=True,
+    )
 
