@@ -31,7 +31,6 @@ from ..utils.sh_utils import SH2RGB
 from ..scene.gaussian_model import BasicPointCloud
 
 import pickle
-import trimesh
 import open3d as o3d
 import cv2
 
@@ -42,6 +41,8 @@ def as_mesh(scene_or_mesh):
 
     If conversion occurs, the returned mesh has only vertex and face data.
     """
+    import trimesh
+
     if isinstance(scene_or_mesh, trimesh.Scene):
 
         # Extract all meshes from the scene

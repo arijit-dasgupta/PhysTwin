@@ -1,0 +1,17 @@
+# Optional reproducible environment via Pixi (https://pixi.sh/).
+# Use when UV alone is blocked by system libraries (e.g. GL/Qt headless vs GUI).
+# Primary workflow remains: `uv sync` / `pip install -e .` per README.
+
+[project]
+name = "phystwin"
+version = "0.1.0"
+description = "PhysTwin (optional Pixi shell)"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.10.*"
+
+[tasks]
+sync = "uv sync --extra dev"
+pytest = "uv run pytest -q -m 'not gpu'"

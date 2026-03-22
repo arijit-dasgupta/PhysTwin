@@ -294,9 +294,7 @@ def write_report(
             "n_springs",
             "Track (B): outer step mean vs spring count",
         )
-        lines.append(
-            "![Track B1 — springs](figures/track_b/track_b_time_vs_springs.png)\n\n"
-        )
+        lines.append("![Track B1 — springs](figures/track_b/track_b_time_vs_springs.png)\n\n")
         lines.append(
             "**Figure B1.** Each point is one real case. **Y** is **outer step mean (ms)** — one full "
             "`step()` including all substeps (graph path when `use_graph` is enabled for the benchmark). "
@@ -328,9 +326,7 @@ def write_report(
             "n_vertices",
             "Track (B): outer step mean vs vertex count",
         )
-        lines.append(
-            "![Track B3 — vertices](figures/track_b/track_b_time_vs_vertices.png)\n\n"
-        )
+        lines.append("![Track B3 — vertices](figures/track_b/track_b_time_vs_vertices.png)\n\n")
         lines.append(
             "**Figure B3.** Same outer-step mean. **X** is `n_vertices` (full vertex count).\n\n"
         )
@@ -346,9 +342,7 @@ def write_report(
         p_b4 = os.path.join(fig_b, "track_b_time_vs_springs_loglog.png")
         fig.savefig(p_b4, dpi=120)
         plt.close(fig)
-        lines.append(
-            "![Track B4 — loglog](figures/track_b/track_b_time_vs_springs_loglog.png)\n\n"
-        )
+        lines.append("![Track B4 — loglog](figures/track_b/track_b_time_vs_springs_loglog.png)\n\n")
         lines.append(
             "**Figure B4 (optional).** Log–log view of B1 for rough scaling intuition.\n\n"
         )
@@ -400,7 +394,12 @@ def write_report(
                     f"**Track (B) segment `{seg}` vs `n_springs`.** Same segment definition as above.\n\n"
                 )
             rel3 = _plot_segment_track_b(
-                fig_b, seg, topology_rows, "n_vertices", "n_vertices", f"segment_{seg}_vs_vertices.png"
+                fig_b,
+                seg,
+                topology_rows,
+                "n_vertices",
+                "n_vertices",
+                f"segment_{seg}_vs_vertices.png",
             )
             if rel3:
                 lines.append(f"![](figures/track_b/{os.path.basename(rel3)})\n\n")
@@ -409,8 +408,10 @@ def write_report(
                 )
 
     lines.append("## Track (A) — parallel instances (same case)\n\n")
-    trc = timing_row_count if timing_row_count is not None else (
-        len(parallel_rows) if parallel_rows else 0
+    trc = (
+        timing_row_count
+        if timing_row_count is not None
+        else (len(parallel_rows) if parallel_rows else 0)
     )
     last_n = last_timed_n
     if parallel_rows and last_n is None:
@@ -550,7 +551,9 @@ def write_report(
         "- **Outer step mean (ms):** one full `step()` call (all substeps); graph path when `cfg.use_graph`.\n"
     )
     lines.append("- **spring_Y MB:** approximate bytes for stiffness log tensor.\n")
-    lines.append("- **Peak alloc MB:** `torch.cuda.max_memory_allocated()` around the timed region.\n\n")
+    lines.append(
+        "- **Peak alloc MB:** `torch.cuda.max_memory_allocated()` around the timed region.\n\n"
+    )
 
     out_path = os.path.join(output_dir, "REPORT.md")
     with open(out_path, "w", encoding="utf-8") as f:

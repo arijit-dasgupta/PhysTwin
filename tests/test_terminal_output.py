@@ -3,13 +3,7 @@
 from __future__ import annotations
 
 import io
-import pathlib
 import re
-import sys
-
-PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 from rerun_viz.terminal_output import print_dim_status, print_file_recording, print_replay_banner
 

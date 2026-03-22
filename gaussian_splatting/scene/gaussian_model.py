@@ -18,7 +18,6 @@ import json
 from ..utils.system_utils import mkdir_p
 from plyfile import PlyData, PlyElement
 from ..utils.sh_utils import RGB2SH
-from simple_knn._C import distCUDA2
 from ..utils.graphics_utils import BasicPointCloud
 from ..utils.general_utils import strip_symmetric, build_scaling_rotation, get_minimum_axis, flip_align_view
 
@@ -169,6 +168,8 @@ class GaussianModel:
         features[:, 3:, 1:] = 0.0
 
         print("Number of points at initialisation : ", fused_point_cloud.shape[0])
+
+        from simple_knn._C import distCUDA2
 
         dist2 = torch.clamp_min(distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()), 0.0000001)
         if self.isotropic:

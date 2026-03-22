@@ -1,0 +1,8 @@
+---
+description: Keep agent docs in sync when imports or entrypoints change.
+globs: pyproject.toml,src/**,benchmarks/**,scripts/**,README.md
+---
+
+# PhysTwin — update agent docs
+
+If a change affects **import paths**, **packaging** (`pyproject.toml`), **default CLIs**, or **benchmark entrypoints**, update `AGENTS.md`, `docs/agents/imports-and-packages.md`, and the root `README.md` in the same PR when practical.

@@ -8,14 +8,14 @@ This document explains the repo layout, where the **spring-mass forward step** l
 
 - **PhysTwin**: Physics-informed reconstruction and simulation of deformable objects from videos (ICCV 2025).
 - **Pipeline**: Raw video → processed data (`final_data.pkl`) → optimization (CMA-ES then gradient-based) → trained spring-mass params → **interactive playground** (keyboard/Gradio) or inference.
-- **Core simulation**: Differentiable spring-mass system implemented in **Nvidia Warp** (GPU), in `qqtt/model/diff_simulator/spring_mass_warp.py`.
-- **Training / inference / playground**: `qqtt/engine/trainer_warp.py` builds the simulator from data and runs optimization or forward rollout.
+- **Core simulation**: Differentiable spring-mass system implemented in **Nvidia Warp** (GPU), in `src/qqtt/model/diff_simulator/spring_mass_warp.py`.
+- **Training / inference / playground**: `src/qqtt/engine/trainer_warp.py` builds the simulator from data and runs optimization or forward rollout.
 
 ---
 
 ## 2. Where the spring-mass forward step lives
 
-**File:** `qqtt/model/diff_simulator/spring_mass_warp.py`
+**File:** `src/qqtt/model/diff_simulator/spring_mass_warp.py`
 
 - **Main entry point for one “logical” timestep:** `SpringMassSystemWarp.step()` (around lines 973–1032).
 - One call to `step()` advances time by **one frame** by running **`num_substeps`** internal substeps (e.g. 10). So “one timestep” in the sense of one frame = one `step()` = multiple substeps.
@@ -112,7 +112,7 @@ So: **nodes** = object vertices + control points (conceptually); **springs** = e
 ## 5. Where data and “actions” come from: `final_data.pkl`
 
 - **File:** e.g. `./data/different_types/<case_name>/final_data.pkl`.
-- **Loaded by:** `qqtt/data/real_data.py` → `RealData` (used by `InvPhyTrainerWarp` in `trainer_warp.py`).
+- **Loaded by:** `src/qqtt/data/real_data.py` → `RealData` (used by `InvPhyTrainerWarp` in `trainer_warp.py`).
 
 **Relevant keys (from `real_data.py` and data_process scripts):**
 
@@ -138,7 +138,7 @@ So: **nodes** = object vertices + control points (conceptually); **springs** = e
 
 ### 6.2 Data flow (how keys become control targets and then forces)
 
-1. **Key mapping** (`interactive_playground_gradio.py` and `trainer_warp.py`):
+1. **Key mapping** (`scripts/shims/interactive_playground_gradio.py` → `scripts/entrypoints/playground/`, and `trainer_warp.py`):
    - In `setup_simulation()`, `key_mappings` is set, e.g.:
      - `"w"` → `(0, [0.005, 0, 0])`  (panel 0, +X)
      - `"s"` → `(0, [-0.005, 0, 0])`
@@ -146,7 +146,7 @@ So: **nodes** = object vertices + control points (conceptually); **springs** = e
      - For two control parts, `"i","k","j","l","o","u"` map to panel 1 with similar deltas.
    - `inv_ctrl` can flip the horizontal direction.
 
-2. **Simulation thread** (`simulation_loop` in `interactive_playground_gradio.py`):
+2. **Simulation thread** (`simulation_loop` in `scripts/entrypoints/playground/interactive_playground_gradio.py`):
    - Key press/release is sent via `control_queue` (`key:...` / `release:...`), and `trainer.pressed_keys` is updated.
    - Each loop iteration:
      - **Set control for this frame:**  
@@ -200,16 +200,16 @@ prev_target = current_target (for next iteration)
 
 | What | Where |
 |------|--------|
-| Spring-mass forward step | `qqtt/model/diff_simulator/spring_mass_warp.py` → `SpringMassSystemWarp.step()` |
+| Spring-mass forward step | `src/qqtt/model/diff_simulator/spring_mass_warp.py` → `SpringMassSystemWarp.step()` |
 | Per-substep state | `State` in same file; list `simulator.wp_states` |
 | Spring topology | `wp_springs` (vec2i), `wp_rest_lengths`, `wp_spring_Y` |
 | Control interpolation | `set_control_points` kernel; driven by `wp_original_control_point`, `wp_target_control_point` |
-| Data load | `qqtt/data/real_data.py` → `final_data.pkl` → `object_points`, `controller_points`, etc. |
-| Trainer builds simulator | `qqtt/engine/trainer_warp.py` → `InvPhyTrainerWarp.__init__` → `SpringMassSystemWarp(...)` |
+| Data load | `src/qqtt/data/real_data.py` → `final_data.pkl` → `object_points`, `controller_points`, etc. |
+| Trainer builds simulator | `src/qqtt/engine/trainer_warp.py` → `InvPhyTrainerWarp.__init__` → `SpringMassSystemWarp(...)` |
 | Set control from data (training) | `simulator.set_controller_target(frame_idx)` |
 | Set control for interactive (Gradio) | `simulator.set_controller_interactive(prev_target, current_target)` |
 | Key → target delta (Gradio) | `trainer.key_mappings`, `trainer.get_target_change()` |
-| Gradio simulation loop | `interactive_playground_gradio.py` → `GradioInteractivePlayground.simulation_loop` |
+| Gradio simulation loop | `scripts/entrypoints/playground/interactive_playground_gradio.py` → `GradioInteractivePlayground.simulation_loop` |
 
 ---
 

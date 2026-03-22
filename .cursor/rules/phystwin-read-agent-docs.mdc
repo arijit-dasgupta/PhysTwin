@@ -1,0 +1,8 @@
+---
+description: Read agent-oriented docs before editing PhysTwin subtrees.
+globs: src/**/*.py,benchmarks/**/*.py,scripts/**/*.py,tests/**/*.py
+---
+
+# PhysTwin — read agent docs
+
+Before substantive edits under `src/qqtt/`, `src/rerun_viz/`, `benchmarks/`, or root training/inference scripts, open the relevant section of `AGENTS.md` and `docs/agents/` (especially `architecture.md` and `imports-and-packages.md`).

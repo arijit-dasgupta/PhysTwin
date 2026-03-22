@@ -2,14 +2,7 @@
 
 from __future__ import annotations
 
-import pathlib
-import sys
-
 import pytest
-
-PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 @pytest.mark.parametrize(
@@ -27,6 +20,6 @@ if str(PROJECT_ROOT) not in sys.path:
     ],
 )
 def test_is_cuda_oom_runtime_error(message: str, expected: bool) -> None:
-    from benchmarks.spring_mass_gpu.parallel import _is_cuda_oom_runtime_error
+    from benchmarks.spring_mass_gpu.oom_match import _is_cuda_oom_runtime_error
 
     assert _is_cuda_oom_runtime_error(RuntimeError(message)) is expected

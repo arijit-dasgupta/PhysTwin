@@ -1,17 +1,9 @@
 from __future__ import annotations
 
-import pathlib
-import sys
-
 import numpy as np
 import rerun as rr
 
-# Ensure the project root is on sys.path so that `rerun_viz` can be imported
-PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from rerun_viz.spring_mass_logging import (  # noqa: E402
+from rerun_viz.spring_mass_logging import (
     build_spring_strips,
     compute_spring_colors_from_stiffness,
     compute_spring_colors_from_stretch,

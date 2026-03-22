@@ -1,3 +1,6 @@
+# DEPRECATED for new setups: prefer UV — see `env_install/install.sh` and README.md.
+# This script is retained for backwards compatibility with conda-based workflows.
+
 conda install -y numpy==1.26.4
 pip install warp-lang
 pip install usd-core matplotlib

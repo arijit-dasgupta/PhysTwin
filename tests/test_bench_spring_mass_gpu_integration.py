@@ -19,6 +19,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(
     os.environ.get("RUN_GPU_BENCH") != "1",
     reason="Set RUN_GPU_BENCH=1 to run the real GPU benchmark subprocess (slow; catches Warp compile issues).",
@@ -29,7 +30,6 @@ def test_bench_spring_mass_segment_profile_one_case() -> None:
     if not torch.cuda.is_available():
         pytest.skip("CUDA required")
 
-    sys.path.insert(0, str(REPO))
     from benchmarks.spring_mass_gpu.discover import discover_cases
 
     cases = discover_cases(str(REPO / "data" / "different_types"))

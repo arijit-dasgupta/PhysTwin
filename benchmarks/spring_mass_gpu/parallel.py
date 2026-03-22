@@ -9,23 +9,11 @@ from dataclasses import dataclass
 import torch
 
 from benchmarks.spring_mass_gpu.load_case import load_trainer_same_config
+from benchmarks.spring_mass_gpu.oom_match import _is_cuda_oom_runtime_error
 from benchmarks.spring_mass_gpu.physics import step_and_advance_state, step_forward_once
 from benchmarks.spring_mass_gpu.profile_segments import profile_one_outer_step
 from benchmarks.spring_mass_gpu.timing import TimingStats, cuda_sync, time_block
 from rerun_viz.replay_core import load_config_and_camera, set_all_seeds
-
-_OOM_SUBSTRINGS = (
-    "out of memory",
-    "failed to allocate",
-    "cuda out of memory",
-    "warp cuda error",
-)
-
-
-def _is_cuda_oom_runtime_error(exc: BaseException) -> bool:
-    """True if *exc* looks like a CUDA / Warp OOM (case-insensitive message match)."""
-    msg = str(exc).lower()
-    return any(s in msg for s in _OOM_SUBSTRINGS)
 
 
 @dataclass

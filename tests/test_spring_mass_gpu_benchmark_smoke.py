@@ -2,14 +2,7 @@
 
 from __future__ import annotations
 
-import pathlib
-import sys
-
 import pytest
-
-PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def test_discover_cases_empty_for_missing_dir():
@@ -31,6 +24,7 @@ def test_timing_stats_shape():
     assert st.mean_ms >= 0
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(
     not __import__("torch").cuda.is_available(),
     reason="CUDA not available",

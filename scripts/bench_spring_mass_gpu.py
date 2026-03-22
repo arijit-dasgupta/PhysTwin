@@ -28,25 +28,19 @@ from __future__ import annotations
 
 import argparse
 import gc
-import os
 import sys
 import traceback
 from datetime import datetime, timezone
 
-# Repo root
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-
 
 def main() -> None:
     import torch
+
     from benchmarks.spring_mass_gpu.discover import discover_cases
     from benchmarks.spring_mass_gpu.gpu_info import collect_gpu_report
     from benchmarks.spring_mass_gpu.parallel import rows_for_all_n, trainers_until_oom
     from benchmarks.spring_mass_gpu.report import write_report
     from benchmarks.spring_mass_gpu.topology import benchmark_one_case
-
     from qqtt.utils import cfg
 
     _epilog = """\
@@ -212,9 +206,7 @@ Smoke / CI: pytest tests/test_spring_mass_gpu_benchmark_smoke.py
             on_progress=on_progress,
         )
         parallel_load_complete = True
-        log_evt(
-            f"Parallel load phase complete: {len(trainers)} trainer(s), oom_at_n={oom_at}"
-        )
+        log_evt(f"Parallel load phase complete: {len(trainers)} trainer(s), oom_at_n={oom_at}")
         emit_report()
 
         w_tm = max(1, min(3, args.warmup))

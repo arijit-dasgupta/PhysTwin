@@ -10,6 +10,7 @@ data_collect*
 *.pkl
 *.log
 *.txt
+!config/data_spec_minimal.txt
 past*
 deprecated/
 *.npz
