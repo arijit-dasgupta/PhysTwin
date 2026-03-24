@@ -58,7 +58,7 @@ def main() -> None:
         "--output-rrd",
         type=str,
         default=None,
-        help="Output .rrd path for --rerun_mode file (default: replay_<case_name>.rrd).",
+        help="Output .rrd path for --rerun_mode file (default: replay_<case_name>[_<downsample-version>].rrd).",
     )
     parser.add_argument(
         "--grpc_port",
@@ -155,7 +155,15 @@ def main() -> None:
         action="store_true",
         help="Ignore pre-pass cache and recompute (overwrites cache when enabled).",
     )
+    parser.add_argument(
+        "--downsample-version",
+        type=str,
+        default=None,
+        help="If set, load coarse bundle from <base_path>/<case_name>/downsampled/<tag>/ (validates artifacts).",
+    )
     args = parser.parse_args()
+
+    downsample_tag = (args.downsample_version or "").strip() or None
 
     if args.minimal:
         logging_options = SpringMassLoggingOptions(
@@ -194,7 +202,11 @@ def main() -> None:
     with quiet_qqtt_stream_logs():
         load_config_and_camera(args.base_path, args.case_name)
         trainer, checkpoint_path = load_trainer_and_model(
-            args.base_path, args.case_name, return_checkpoint_path=True
+            args.base_path,
+            args.case_name,
+            return_checkpoint_path=True,
+            downsample_version=downsample_tag,
+            emit_downsample_tty_summary=downsample_tag is not None,
         )
 
     sim = trainer.simulator
@@ -229,6 +241,7 @@ def main() -> None:
         checkpoint_path=checkpoint_path,
         prepass_cache=not args.no_prepass_cache,
         prepass_refresh=args.prepass_refresh,
+        downsample_version=downsample_tag,
     )
 
 

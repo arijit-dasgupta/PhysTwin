@@ -8,7 +8,7 @@ import importlib.util
 
 def test_top_level_package_specs():
     """Do not ``import qqtt`` here: it pulls gaussian_splatting (needs built simple_knn)."""
-    for name in ("qqtt", "rerun_viz", "benchmarks"):
+    for name in ("qqtt", "rerun_viz", "downsampling", "benchmarks"):
         spec = importlib.util.find_spec(name)
         assert spec is not None, name
 
@@ -16,10 +16,12 @@ def test_top_level_package_specs():
 def test_package_locations_under_src_or_repo():
     qqtt_spec = importlib.util.find_spec("qqtt")
     rerun_spec = importlib.util.find_spec("rerun_viz")
+    down_spec = importlib.util.find_spec("downsampling")
     benchmarks = importlib.import_module("benchmarks")
 
     assert qqtt_spec.origin and "src" in qqtt_spec.origin.replace("\\", "/")
     assert rerun_spec.origin and "src" in rerun_spec.origin.replace("\\", "/")
+    assert down_spec and down_spec.origin and "src" in down_spec.origin.replace("\\", "/")
     assert "benchmarks" in benchmarks.__file__.replace("\\", "/")
 
 

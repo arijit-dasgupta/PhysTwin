@@ -14,6 +14,8 @@ uv run pytest -q                  # full suite; GPU tests may skip without CUDA
 ## Packaging / imports
 
 - `tests/test_packaging.py` uses `importlib.util.find_spec` for `qqtt` where full `import qqtt` would require built `gaussian_splatting` extensions.
+- `tests/test_downsampling.py` covers the `downsampling` package (validation, reconstruct, partitions, RealData round-trip) without GPU.
+- `tests/test_replay_downsample_paths.py` mocks `InvPhyTrainerWarp` so downsampled replay path resolution is tested without a full GPU sim init (imports `warp` and `rerun_viz.replay_core`).
 - Optional: `tests/test_packaging.py::test_import_qqtt_when_simple_knn_available` runs full `import qqtt` when `simple_knn` is installed.
 
 ## Lint

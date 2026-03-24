@@ -45,12 +45,12 @@ gaussian = ["gsplat>=1.4", "kornia>=0.7"]
 Homepage = "https://github.com/.../PhysTwin"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/qqtt", "src/rerun_viz", "benchmarks"]
+packages = ["src/qqtt", "src/rerun_viz", "src/downsampling", "benchmarks"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-src = ["src/qqtt", "src/rerun_viz", "tests", "benchmarks", "scripts"]
+src = ["src/qqtt", "src/rerun_viz", "src/downsampling", "tests", "benchmarks", "scripts"]
 exclude = [
   "gaussian_splatting",
   "data_process/TRELLIS",
@@ -71,14 +71,14 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["qqtt", "rerun_viz", "benchmarks", "scripts"]
+known-first-party = ["qqtt", "rerun_viz", "downsampling", "benchmarks", "scripts"]
 
 [tool.ruff.format]
 quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "scripts/shims"]
+pythonpath = [".", "src", "scripts/shims"]
 markers = [
   "gpu: tests that require a CUDA GPU (excluded from default CI)",
 ]

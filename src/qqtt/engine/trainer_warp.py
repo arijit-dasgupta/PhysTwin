@@ -85,6 +85,7 @@ class InvPhyTrainerWarp:
         velocity_path=None,
         pure_inference_mode=False,
         device="cuda:0",
+        precomputed_graph=None,
     ):
         cfg.data_path = data_path
         cfg.base_dir = base_dir
@@ -131,25 +132,52 @@ class InvPhyTrainerWarp:
             raise ValueError(f"Data type {cfg.data_type} not supported")
 
         # Initialize the vertices, springs, rest lengths and masses
-        if self.controller_points is None:
-            firt_frame_controller_points = None
+        if precomputed_graph is not None:
+            if self.init_masks is not None:
+                raise ValueError("precomputed_graph requires init_masks is None (real-data kNN path)")
+            pg = precomputed_graph
+            for key in (
+                "init_vertices",
+                "init_springs",
+                "init_rest_lengths",
+                "init_masses",
+                "num_object_springs",
+            ):
+                if key not in pg:
+                    raise KeyError(f"precomputed_graph missing {key!r}")
+            self.init_vertices = torch.as_tensor(
+                pg["init_vertices"], dtype=torch.float32, device=cfg.device
+            )
+            self.init_springs = torch.as_tensor(
+                pg["init_springs"], dtype=torch.int32, device=cfg.device
+            )
+            self.init_rest_lengths = torch.as_tensor(
+                pg["init_rest_lengths"], dtype=torch.float32, device=cfg.device
+            )
+            self.init_masses = torch.as_tensor(
+                pg["init_masses"], dtype=torch.float32, device=cfg.device
+            )
+            self.num_object_springs = int(pg["num_object_springs"])
         else:
-            firt_frame_controller_points = self.controller_points[0]
-        (
-            self.init_vertices,
-            self.init_springs,
-            self.init_rest_lengths,
-            self.init_masses,
-            self.num_object_springs,
-        ) = self._init_start(
-            self.structure_points,
-            firt_frame_controller_points,
-            object_radius=cfg.object_radius,
-            object_max_neighbours=cfg.object_max_neighbours,
-            controller_radius=cfg.controller_radius,
-            controller_max_neighbours=cfg.controller_max_neighbours,
-            mask=self.init_masks,
-        )
+            if self.controller_points is None:
+                firt_frame_controller_points = None
+            else:
+                firt_frame_controller_points = self.controller_points[0]
+            (
+                self.init_vertices,
+                self.init_springs,
+                self.init_rest_lengths,
+                self.init_masses,
+                self.num_object_springs,
+            ) = self._init_start(
+                self.structure_points,
+                firt_frame_controller_points,
+                object_radius=cfg.object_radius,
+                object_max_neighbours=cfg.object_max_neighbours,
+                controller_radius=cfg.controller_radius,
+                controller_max_neighbours=cfg.controller_max_neighbours,
+                mask=self.init_masks,
+            )
 
         self.simulator = SpringMassSystemWarp(
             self.init_vertices,

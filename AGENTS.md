@@ -8,6 +8,7 @@ Read this before large edits. Deeper notes live under `docs/agents/`.
 |------|------|
 | `src/qqtt/` | Core library: differentiable spring–mass (Warp), trainers, data loaders, utils. |
 | `src/rerun_viz/` | Rerun visualization, replay CLI (`python -m rerun_viz.replay_recorded`), helpers. |
+| `src/downsampling/` | Spring–mass coarsening (partition, reconstruct, artifacts, `python -m downsampling.build_downsampled_model`). |
 | `benchmarks/` | Spring–mass GPU benchmarks and reports (importable package). |
 | `gaussian_splatting/` | Vendored 3D Gaussian / rendering code; local `submodules/` builds (`simple-knn`, etc.). |
 | `data_process/` | Data pipelines; may clone external tools (e.g. TRELLIS). |

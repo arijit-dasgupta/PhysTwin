@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import glob
 import logging
+import re
 import time
 import warnings
 from contextlib import contextmanager
@@ -34,6 +35,7 @@ from rerun_viz.spring_mass_logging import (
     object_object_spring_row_indices,
 )
 from rerun_viz.terminal_output import (
+    print_downsampled_bundle_summary,
     print_file_recording,
     print_performance_summary,
     print_prepass_cache_hit,
@@ -42,6 +44,24 @@ from rerun_viz.terminal_output import (
     print_ssh_hint_block,
     print_warning_line,
 )
+
+
+def rerun_replay_application_id(
+    case_name: str | None,
+    downsample_version: str | None,
+) -> str:
+    """
+    Rerun ``application_id`` (app / blueprint name in the viewer).
+
+    Matches default .rrd stem ``replay_<case>`` when not downsampled; with a tag appends
+    ``_<tag>`` (e.g. ``replay_single_lift_sloth_kmeans_r2``).
+    """
+    case = (case_name or "spring_mass").strip() or "spring_mass"
+    safe_case = re.sub(r"[^\w\-.]", "_", case)
+    if downsample_version and (tag := downsample_version.strip()):
+        safe_tag = re.sub(r"[^\w\-.]", "_", tag)
+        return f"replay_{safe_case}_{safe_tag}"
+    return f"replay_{safe_case}"
 
 
 def set_all_seeds(seed: int = 42) -> None:
@@ -83,6 +103,8 @@ def load_trainer_and_model(
     case_name: str,
     *,
     return_checkpoint_path: Literal[False] = False,
+    downsample_version: str | None = None,
+    emit_downsample_tty_summary: bool = False,
 ) -> InvPhyTrainerWarp: ...
 
 
@@ -92,32 +114,13 @@ def load_trainer_and_model(
     case_name: str,
     *,
     return_checkpoint_path: Literal[True],
+    downsample_version: str | None = None,
+    emit_downsample_tty_summary: bool = False,
 ) -> tuple[InvPhyTrainerWarp, str]: ...
 
 
-def load_trainer_and_model(
-    base_path: str,
-    case_name: str,
-    *,
-    return_checkpoint_path: bool = False,
-) -> InvPhyTrainerWarp | tuple[InvPhyTrainerWarp, str]:
-    """Create an InvPhyTrainerWarp and load the best trained spring-mass params."""
-    base_dir = f"experiments/{case_name}"
-    logger.set_log_file(path=base_dir, name="rerun_replay_log")
-
-    trainer = InvPhyTrainerWarp(
-        data_path=f"{base_path}/{case_name}/final_data.pkl",
-        base_dir=base_dir,
-        pure_inference_mode=True,
-    )
-
-    candidates = sorted(glob.glob(f"{base_dir}/train/best_*.pth"))
-    assert len(candidates) > 0, (
-        f"No best_*.pth checkpoint found under {base_dir}/train; did you run training?"
-    )
-    model_path = candidates[0]
+def _apply_spring_mass_checkpoint(trainer: InvPhyTrainerWarp, model_path: str) -> None:
     logger.debug(f"[RERUN-REPLAY] Loading model from: {model_path}")
-
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", FutureWarning)
         checkpoint = torch.load(model_path, map_location=cfg.device)
@@ -144,6 +147,72 @@ def load_trainer_and_model(
         trainer.simulator.wp_init_velocities,
         pure_inference=True,
     )
+
+
+def load_trainer_and_model(
+    base_path: str,
+    case_name: str,
+    *,
+    return_checkpoint_path: bool = False,
+    downsample_version: str | None = None,
+    emit_downsample_tty_summary: bool = False,
+) -> InvPhyTrainerWarp | tuple[InvPhyTrainerWarp, str]:
+    """Create an InvPhyTrainerWarp and load spring-mass params (full or downsampled bundle)."""
+    base_dir = f"experiments/{case_name}"
+    logger.set_log_file(path=base_dir, name="rerun_replay_log")
+
+    if downsample_version is not None:
+        from downsampling.io import artifact_paths, load_coarse_npz
+        from downsampling.validate import validate_downsampled_bundle
+
+        info = validate_downsampled_bundle(base_path, case_name, downsample_version)
+        paths = artifact_paths(base_path, case_name, downsample_version)
+        z = load_coarse_npz(paths["coarse_npz"])
+        precomputed_graph = {
+            "init_vertices": z["init_vertices"],
+            "init_springs": z["init_springs"],
+            "init_rest_lengths": z["init_rest_lengths"],
+            "init_masses": z["init_masses"],
+            "num_object_springs": int(np.asarray(z["num_object_springs"]).item()),
+        }
+        trainer = InvPhyTrainerWarp(
+            data_path=paths["final_data"],
+            base_dir=base_dir,
+            pure_inference_mode=True,
+            precomputed_graph=precomputed_graph,
+        )
+        model_path = paths["checkpoint"]
+        logger.info(
+            f"[RERUN-REPLAY] Downsampled tag={downsample_version} K={info['K']} "
+            f"n_springs={trainer.simulator.n_springs} dir={info['dir']}"
+        )
+        _apply_spring_mass_checkpoint(trainer, model_path)
+        if emit_downsample_tty_summary:
+            print_downsampled_bundle_summary(
+                tag=downsample_version,
+                K=int(info["K"]),
+                n_springs=int(trainer.simulator.n_springs),
+                bundle_dir=info["dir"],
+                final_data_path=paths["final_data"],
+                coarse_npz_path=paths["coarse_npz"],
+                checkpoint_path=model_path,
+            )
+        if return_checkpoint_path:
+            return trainer, model_path
+        return trainer
+
+    trainer = InvPhyTrainerWarp(
+        data_path=f"{base_path}/{case_name}/final_data.pkl",
+        base_dir=base_dir,
+        pure_inference_mode=True,
+    )
+
+    candidates = sorted(glob.glob(f"{base_dir}/train/best_*.pth"))
+    assert len(candidates) > 0, (
+        f"No best_*.pth checkpoint found under {base_dir}/train; did you run training?"
+    )
+    model_path = candidates[0]
+    _apply_spring_mass_checkpoint(trainer, model_path)
 
     if return_checkpoint_path:
         return trainer, model_path
@@ -232,6 +301,8 @@ def replay_with_rerun(
     checkpoint_path: str | None = None,
     prepass_cache: bool = True,
     prepass_refresh: bool = False,
+    downsample_version: str | None = None,
+    rerun_application_id: str | None = None,
 ) -> None:
     """Replay recorded controller_points and stream to Rerun (file, serve, or connect)."""
     simulator = trainer.simulator
@@ -276,10 +347,11 @@ def replay_with_rerun(
         f"(total available: {total_frames})"
     )
 
-    rr.init("phystwin_spring_mass_replay", spawn=False)
+    app_id = rerun_application_id or rerun_replay_application_id(case_name, downsample_version)
+    rr.init(app_id, spawn=False)
 
     if rerun_mode == "file":
-        path = output_rrd or f"replay_{case_name or 'spring_mass'}.rrd"
+        path = output_rrd or f"{app_id}.rrd"
         rr.save(path)
         logger.debug(f"[RERUN-REPLAY] Writing to file: {path}")
         print_file_recording(path)

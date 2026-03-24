@@ -873,3 +873,21 @@ and keep everything else identical:
 - same evaluation metric
 
 That way, the comparison isolates the effect of **partition strategy** rather than mixing several design changes at once.
+
+---
+
+## 14. On-disk downsampled bundle (implementation)
+
+Built under `<base_path>/<case_name>/downsampled/<tag>/` by `python -m downsampling.build_downsampled_model` and consumed by Rerun replay with `--downsample-version <tag>` (presence of the flag selects the downsampled bundle).
+
+| File | Role |
+|------|------|
+| `final_data_downsampled.pkl` | Coarse `RealData` pickle: `object_points` is `(T, K, 3)` trajectories; `surface_points` / `interior_points` empty; `N_orig = N_surf = N_all = K`. |
+| `coarse_model.npz` | `init_vertices` `(K+C, 3)`, `init_springs` `(E, 2)`, `init_rest_lengths`, `init_masses`, `num_object_springs`, `num_all_points=K`. First `K` vertex rows match `object_points[0]`; trailing `C` rows match `controller_points[0]`. |
+| `partition_map.npy` | Length `N_fine` (fine `num_all_points`), labels in `0 .. K-1`. |
+| `downsample_meta.json` | `version`, `K`, `method`, `r`, `N_fine`, stiffness/rest options, etc. |
+| `best_downsampled.pth` | Same keys as fine `best_*.pth`: **linear** `spring_Y`, `num_object_springs`, collision tensors (copied from fine). |
+
+**Spring rows:** object–object indices `i < j` with `j < K`; control–object rows `[K + c, α]` with `α < K`. Replay validates the bundle via `downsampling.validate.validate_downsampled_bundle` before constructing `InvPhyTrainerWarp` with `precomputed_graph` (no kNN rebuild on coarse points).
+
+See root `README.md` and `src/rerun_viz/README.md` for CLI examples.

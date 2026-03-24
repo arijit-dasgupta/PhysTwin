@@ -7,7 +7,7 @@
 
 ![Teaser](./assets/teaser.png)
 
-This repository contains the official implementation of **PhysTwin**. The core Python packages live under **`src/`** (`qqtt`, `rerun_viz`); benchmarks ship as the **`benchmarks`** package. **CLI-style scripts** live under **`scripts/shims/`** (thin files that delegate to `scripts/entrypoints/...`); run them from the repo root, e.g. `python scripts/shims/train_warp.py` (see `docs/agents/repo-layout.md`).
+This repository contains the official implementation of **PhysTwin**. The core Python packages live under **`src/`** (`qqtt`, `rerun_viz`, `downsampling`); benchmarks ship as the **`benchmarks`** package. **CLI-style scripts** live under **`scripts/shims/`** (thin files that delegate to `scripts/entrypoints/...`); run them from the repo root, e.g. `python scripts/shims/train_warp.py` (see `docs/agents/repo-layout.md`).
 
 ---
 
@@ -44,7 +44,7 @@ This repository contains the official implementation of **PhysTwin**. The core P
 5. **Verify imports:**
 
    ```bash
-   uv run python -c "import qqtt, rerun_viz"
+   uv run python -c "import qqtt, rerun_viz, downsampling"
    ```
 
    Full `import qqtt` after extensions are built: see `docs/agents/testing.md`.
@@ -86,6 +86,7 @@ Paths like `experiments/`, `data/`, and `experiments_optimization/` are unchange
 | Inference | `python scripts/shims/script_inference.py` |
 | Gaussian (first frame) | `bash scripts/shell/gs_run.sh` |
 | Rerun replay → `.rrd` | `python -m rerun_viz.replay_recorded --case_name double_lift_cloth_3` |
+| Coarse spring–mass bundle | `uv run python -m downsampling.build_downsampled_model --base_path ./data/different_types --case_name CASE --r 4` writes under `downsampled/<tag>/` with an **auto tag** (`<effective_method>_r<r>`, e.g. `kmeans_r4`, or `kmeans_r4_2` if the first exists). Optional **`--tag myname`** picks the folder and **fails** if that bundle already exists. If `cfg.self_collision` is true and you pass `--method kmeans`, the builder **auto-switches to graph** coarsening (logged on stderr). Use `r >= 1` so `K = ceil(N/r) ≤ N`. Replay: `--downsample-version <tag>` (implies downsampled bundle load). |
 | Spring–mass GPU benchmark | `python scripts/bench_spring_mass_gpu.py --output_dir benchmarks/reports/run_001` |
 
 **Gradio:** `python scripts/shims/interactive_playground_gradio.py`, `python scripts/shims/run_playground_gradio.py`, or `bash scripts/shell/run_gradio_filtered.sh`.

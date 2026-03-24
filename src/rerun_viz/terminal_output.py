@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from typing import TextIO
 
@@ -88,6 +89,40 @@ def print_serve_ready(port: int, uri: str, *, stream: TextIO | None = None) -> N
         flush=True,
     )
     print(f"  {_wrap('→', _C.DIM, stream=st)}  {url}", file=st, flush=True)
+
+
+def print_downsampled_bundle_summary(
+    *,
+    tag: str,
+    K: int,
+    n_springs: int,
+    bundle_dir: str,
+    final_data_path: str,
+    coarse_npz_path: str,
+    checkpoint_path: str,
+    stream: TextIO | None = None,
+) -> None:
+    """TTY-visible summary when replay loads a downsampled bundle (not logged under WARNING-only)."""
+    st = stream or sys.stdout
+    title = _wrap(" Downsampled spring–mass ", _C.BOLD, _C.CYAN, stream=st)
+    t = _wrap(tag, _C.GREEN, stream=st)
+    print(f"\n{title}  tag={t}\n", file=st, flush=True)
+    print(
+        f"  {_wrap('K', _C.DIM, stream=st)}          {K} coarse object verts  ·  "
+        f"{_wrap('n_springs', _C.DIM, stream=st)} {n_springs:,}",
+        file=st,
+        flush=True,
+    )
+    print(f"  {_wrap('bundle_dir', _C.DIM, stream=st)} {_wrap(bundle_dir, _C.DIM, stream=st)}", file=st, flush=True)
+    print(f"  {_wrap('final_data', _C.DIM, stream=st)} {_wrap(final_data_path, _C.DIM, stream=st)}", file=st, flush=True)
+    print(f"  {_wrap('coarse_npz', _C.DIM, stream=st)} {_wrap(coarse_npz_path, _C.DIM, stream=st)}", file=st, flush=True)
+    ck = os.path.basename(checkpoint_path)
+    print(
+        f"  {_wrap('checkpoint', _C.DIM, stream=st)} {_wrap(ck, _C.MAGENTA, stream=st)}  ({checkpoint_path})",
+        file=st,
+        flush=True,
+    )
+    print(file=st, flush=True)
 
 
 def print_phys_twin_ready_panel(
