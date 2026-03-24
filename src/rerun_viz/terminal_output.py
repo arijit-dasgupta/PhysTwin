@@ -212,3 +212,33 @@ def print_performance_summary(
         flush=True,
     )
     print(file=st, flush=True)
+
+
+def print_multi_mesh_precompute_header(*, stream: TextIO | None = None) -> None:
+    """Banner before enumerating spring 3-cliques for each model variant."""
+    st = stream or sys.stdout
+    title = _wrap(" Multi-model · spring mesh (rest pose) ", _C.BOLD, _C.MAGENTA, stream=st)
+    print(f"\n{title}", file=st, flush=True)
+    print(
+        f"  {_wrap('Triangle topology from object–object spring 3-cliques (progress bar).', _C.DIM, stream=st)}",
+        file=st,
+        flush=True,
+    )
+    print(file=st, flush=True)
+
+
+def print_multi_mesh_precompute_footer(
+    *,
+    labels: list[str],
+    mesh_ns: list[int],
+    n_tris: list[int],
+    stream: TextIO | None = None,
+) -> None:
+    """Summary table after all meshes are built."""
+    st = stream or sys.stdout
+    hdr = f"  {_wrap('variant', _C.DIM, stream=st):<12} {_wrap('verts', _C.DIM, stream=st):>8}  {_wrap('tris', _C.DIM, stream=st):>8}"
+    print(hdr, file=st, flush=True)
+    for lab, nv, nt in zip(labels, mesh_ns, n_tris, strict=True):
+        # Plain label keeps column alignment (ANSI codes break width formatting).
+        print(f"  {lab:<24} {nv:>8,}  {nt:>8,}", file=st, flush=True)
+    print(file=st, flush=True)
